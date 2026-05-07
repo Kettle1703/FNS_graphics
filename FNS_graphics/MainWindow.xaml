@@ -1,0 +1,175 @@
+﻿<Window x:Class="FNS_graphics.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:FNS_graphics"
+        mc:Ignorable="d"
+        Title="Панель шифрования и дешифрования"
+        Height="760"
+        Width="1000"
+        MinHeight="680"
+        MinWidth="860">
+    <Window.Resources>
+        <Style TargetType="Window">
+            <Setter Property="FontFamily" Value="Bahnschrift" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Background" Value="#FFF2F8F2" />
+            <Setter Property="Foreground" Value="#FF1F3A2A" />
+        </Style>
+
+        <Style TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <Style x:Key="SectionTitleStyle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="Margin" Value="0,4,0,10" />
+        </Style>
+
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="#FFF1F8F1" />
+            <Setter Property="BorderBrush" Value="#FFC4DCC9" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="BorderBrush" Value="#FFB6CCB8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background" Value="#FFFFFFFF" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="AcceptsReturn" Value="False" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="HorizontalScrollBarVisibility" Value="Hidden" />
+        </Style>
+
+        <Style TargetType="Button">
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="MinWidth" Value="150" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Background" Value="#FF70B07D" />
+            <Setter Property="Foreground" Value="#FF193B26" />
+            <Setter Property="BorderBrush" Value="#FF5A996A" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </Window.Resources>
+
+    <Window.CommandBindings>
+        <CommandBinding Command="{x:Static local:MainWindow.EncryptCommand}" Executed="EncryptCommand_Executed" />
+        <CommandBinding Command="{x:Static local:MainWindow.DecryptCommand}" Executed="DecryptCommand_Executed" />
+    </Window.CommandBindings>
+
+    <Window.InputBindings>
+        <KeyBinding Key="Enter" Command="{x:Static local:MainWindow.EncryptCommand}" />
+        <KeyBinding Key="Enter" Modifiers="Shift" Command="{x:Static local:MainWindow.DecryptCommand}" />
+    </Window.InputBindings>
+
+    <Grid Margin="6">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}">Шифрование</TextBlock>
+
+                        <TextBlock>Исходный текст</TextBlock>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="SourceTextBox" Grid.Column="0" />
+                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=SourceTextBox}" Margin="8,0,0,0" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="Шифровать" Click="Encrypt_Click" MinWidth="150" Margin="0,0,10,0" />
+                            <TextBlock x:Name="EncryptMetricsTextBlock" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0" Foreground="#FF3F5A45" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}">Ключи гибридного шифрования ECDH</TextBlock>
+
+                        <TextBlock>Ключ отправителя (ECDH)</TextBlock>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="SharedSenderPublicKeyTextBox" Grid.Column="0" />
+                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=SharedSenderPublicKeyTextBox}" Margin="8,0,0,0" />
+                        </Grid>
+
+                        <TextBlock>Ключ получателя (ECDH)</TextBlock>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="SharedReceiverPublicKeyTextBox" Grid.Column="0" />
+                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=SharedReceiverPublicKeyTextBox}" Margin="8,0,0,0" />
+                        </Grid>
+
+                        <TextBlock>Зашифрованный по ECC ключ для симметричного шифрования</TextBlock>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="SharedSessionKeyTextBox" Grid.Column="0" IsReadOnly="True" />
+                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=SharedSessionKeyTextBox}" Margin="8,0,0,0" />
+                        </Grid>
+
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}">Дешифрование</TextBlock>
+
+                        <TextBlock>Шифротекст</TextBlock>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="TransferCipherTextTextBox" Grid.Column="0" />
+                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=TransferCipherTextTextBox}" Margin="8,0,0,0" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="Дешифровать" Click="Decrypt_Click" MinWidth="150" Margin="0,0,10,0" />
+                            <TextBlock x:Name="DecryptMetricsTextBlock" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0" Foreground="#FF3F5A45" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="StatusTextBlock" Foreground="#FF2E6A42" Margin="0,6,0,0" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>
