@@ -89,12 +89,7 @@ namespace FNS_rebuild
                     continue;
                 }
 
-                byte[] shard;
-                try
-                {
-                    shard = Convert.FromBase64String(encoded);
-                }
-                catch (FormatException)
+                if (!TryDecodeBase64(encoded, out byte[] shard))
                 {
                     shards[i] = null!;
                     missing_or_damaged++;
@@ -123,6 +118,29 @@ namespace FNS_rebuild
                 throw new InvalidOperationException("CRC полезной нагрузки не совпал после восстановления: пакет повреждён.");
 
             return Encoding.UTF8.GetString(restored_payload);
+        }
+
+        static bool TryDecodeBase64(string encoded, out byte[] bytes)
+        {
+            // Преобразует Base64 без исключений, чтобы не использовать FormatException как рабочий путь.
+            int buffer_length = ((encoded.Length + 3) / 4) * 3;
+            byte[] buffer = new byte[buffer_length];
+
+            if (!Convert.TryFromBase64String(encoded, buffer, out int written))
+            {
+                bytes = [];
+                return false;
+            }
+
+            if (written == buffer.Length)
+            {
+                bytes = buffer;
+                return true;
+            }
+
+            bytes = new byte[written];
+            Array.Copy(buffer, bytes, written);
+            return true;
         }
     }
 }

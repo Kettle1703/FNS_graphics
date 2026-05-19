@@ -6,7 +6,6 @@ using System.Threading;
 using static System.Console;
 using Digit = System.UInt16;
 using OfficeOpenXml;
-using OfficeOpenXml.Drawing.Chart;
 using System.Diagnostics;
 using System.Text;
 
@@ -15,6 +14,7 @@ namespace FNS_rebuild
     internal class Analysis
     {
         public static bool debug_mode = false;  // вся отладочная информация будет выводиться в консоль 
+        const int Default_analysis_key_length = 64;  // длина служебного ключа для теста чувствительности к ключу
 
         public static void Run_three_analysis_reports(Strategy_wrapper wrapper)
         {
@@ -151,12 +151,6 @@ namespace FNS_rebuild
             int max_factorial_coefficient = 1023;
             int factorial_border_index = max_factorial_coefficient + 1; // 1024
 
-            if (Factorial_strategy.power == 0)
-            {
-                WriteLine("Анализ не выполнен: мощность алфавита не инициализирована.");
-                return 0;
-            }
-
             Digit[] factorial_border_value = [1]; // значение 1024! в длинной арифметике
             for (int i = 2; i <= factorial_border_index; i++)
                 factorial_border_value = Long_math.Multiply_by_digit(factorial_border_value, (Digit)i, 0);
@@ -197,7 +191,7 @@ namespace FNS_rebuild
             Cipher_options options,
             Performance_report_options? report_options = null)
         {
-            // Строит один xlsx-документ с листами и графиками:
+            // Строит один xlsx-документ с листами данных:
             // 1) коэффициент увеличения;
             // 2) абсолютный прирост длины;
             // 3) скорость Encrypt;
@@ -309,15 +303,19 @@ namespace FNS_rebuild
 
             if (include_avalanche)
             {
+                string base_key = Build_base_key_for_avalanche(options, length);
+                Cipher_options base_key_options = Clone_options_with_key(options, base_key);
+
                 for (int i = 0; i < avalanche_tests_per_length; i++)
                 {
-                    // Для оценки лавинного эффекта ключ/настройки одинаковые,
-                    // меняется только один символ открытого текста.
+                    // Для оценки чувствительности к ключу фиксируется открытый текст,
+                    // меняется только один символ симметрического ключа.
                     string source = Generate_deterministic_string(length, seed: i + length * 10007);
-                    string mutated = Mutate_one_symbol(source, mutation_index: i);
+                    string mutated_key = Mutate_one_symbol(base_key, mutation_index: i);
+                    Cipher_options mutated_key_options = Clone_options_with_key(options, mutated_key);
 
-                    string c1 = wrapper.Encrypt(source, options);
-                    string c2 = wrapper.Encrypt(mutated, options);
+                    string c1 = wrapper.Encrypt(source, base_key_options);
+                    string c2 = wrapper.Encrypt(source, mutated_key_options);
                     avalanche_sum += Compute_symbol_difference_ratio(c1, c2);
                 }
             }
@@ -384,6 +382,26 @@ namespace FNS_rebuild
             char[] result = source.ToCharArray();
             result[index] = new_symbol;
             return new string(result);
+        }
+
+        static string Build_base_key_for_avalanche(Cipher_options options, int source_length)
+        {
+            // Возвращает базовый ключ для теста чувствительности к ключу.
+            if (options.Use_key())
+                return options.Key;
+
+            int key_length = Math.Min(Default_analysis_key_length, Math.Max(16, source_length));
+            return Generate_deterministic_string(key_length, seed: source_length * 7919 + 17);
+        }
+
+        static Cipher_options Clone_options_with_key(Cipher_options source, string key)
+        {
+            // Создаёт копию настроек с заменой только ключа.
+            return new Cipher_options
+            {
+                Block_plain_text_length = source.Block_plain_text_length,
+                Key = key
+            };
         }
 
         static double Compute_symbol_difference_ratio(string left, string right)
@@ -476,19 +494,6 @@ namespace FNS_rebuild
             sheet.Cells[2, 2, row - 1, 2].Style.Numberformat.Format = "0.000";
             sheet.Cells[2, 3, row - 1, 3].Style.Numberformat.Format = "0.000000";
             sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-
-            var chart = sheet.Drawings.AddChart("chart_expansion_ratio", eChartType.Line);
-            chart.Title.Text = "Коэффициент увеличения";
-            chart.SetPosition(1, 0, 5, 0);
-            chart.SetSize(1200, 450);
-
-            string x_range = $"A2:A{row - 1}";
-            string y_range = $"C2:C{row - 1}";
-            var series = chart.Series.Add(sheet.Cells[y_range], sheet.Cells[x_range]);
-            series.Header = "|C| / |M|";
-
-            chart.XAxis.Title.Text = "Длина исходного сообщения";
-            chart.YAxis.Title.Text = "Коэффициент";
         }
 
         static void Fill_absolute_growth_sheet(ExcelWorksheet sheet, List<Performance_point> points)
@@ -506,19 +511,6 @@ namespace FNS_rebuild
 
             sheet.Cells[2, 2, row - 1, 2].Style.Numberformat.Format = "0.000";
             sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-
-            var chart = sheet.Drawings.AddChart("chart_absolute_growth", eChartType.Line);
-            chart.Title.Text = "Абсолютный прирост длины";
-            chart.SetPosition(1, 0, 4, 0);
-            chart.SetSize(1200, 450);
-
-            string x_range = $"A2:A{row - 1}";
-            string y_range = $"B2:B{row - 1}";
-            var series = chart.Series.Add(sheet.Cells[y_range], sheet.Cells[x_range]);
-            series.Header = "|C|-|M|";
-
-            chart.XAxis.Title.Text = "Длина исходного сообщения";
-            chart.YAxis.Title.Text = "Прирост символов";
         }
 
         static void Fill_speed_sheet(ExcelWorksheet sheet, List<Performance_point> points, bool is_encrypt)
@@ -536,23 +528,6 @@ namespace FNS_rebuild
 
             sheet.Cells[2, 2, row - 1, 2].Style.Numberformat.Format = "0.000000";
             sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-
-            string chart_name = is_encrypt ? "chart_encrypt_speed" : "chart_decrypt_speed";
-            string title = is_encrypt ? "Скорость шифрования" : "Скорость дешифрования";
-            string legend = is_encrypt ? "Encrypt" : "Decrypt";
-
-            var chart = sheet.Drawings.AddChart(chart_name, eChartType.Line);
-            chart.Title.Text = title;
-            chart.SetPosition(1, 0, 4, 0);
-            chart.SetSize(1200, 450);
-
-            string x_range = $"A2:A{row - 1}";
-            string y_range = $"B2:B{row - 1}";
-            var series = chart.Series.Add(sheet.Cells[y_range], sheet.Cells[x_range]);
-            series.Header = legend;
-
-            chart.XAxis.Title.Text = "Длина исходного сообщения";
-            chart.YAxis.Title.Text = "Время, мс";
         }
 
         static void Fill_distribution_sheet(
@@ -592,27 +567,14 @@ namespace FNS_rebuild
             sheet.Cells[2, 4, row - 1, 4].Style.Numberformat.Format = "0.000000";
             sheet.Cells[2, 7].Style.Numberformat.Format = "0.000000";
             sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-
-            var chart = sheet.Drawings.AddChart("chart_distribution", eChartType.ColumnClustered);
-            chart.Title.Text = "Распределение символов шифротекста";
-            chart.SetPosition(1, 0, 8, 0);
-            chart.SetSize(1200, 500);
-
-            string x_range = $"A2:A{row - 1}";
-            string y_range = $"D2:D{row - 1}";
-            var series = chart.Series.Add(sheet.Cells[y_range], sheet.Cells[x_range]);
-            series.Header = "Доля символа";
-
-            chart.XAxis.Title.Text = "Индекс символа в алфавите";
-            chart.YAxis.Title.Text = "Доля";
         }
 
         static void Fill_avalanche_sheet(ExcelWorksheet sheet, List<Performance_point> points)
         {
-            // Лавинный эффект: доля отличающихся символов двух шифротекстов,
-            // когда исходные тексты отличаются ровно одним символом.
+            // Лавинный эффект по ключу: доля отличающихся символов двух шифротекстов
+            // при фиксированном открытом тексте и изменении одного символа ключа.
             sheet.Cells[1, 1].Value = "Длина исходной строки";
-            sheet.Cells[1, 2].Value = "Средняя доля отличий шифротекстов";
+            sheet.Cells[1, 2].Value = "Средняя доля отличий шифротекстов (изменение 1 символа ключа)";
 
             int row = 2;
             foreach (Performance_point point in points)
@@ -624,19 +586,6 @@ namespace FNS_rebuild
 
             sheet.Cells[2, 2, row - 1, 2].Style.Numberformat.Format = "0.000000";
             sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-
-            var chart = sheet.Drawings.AddChart("chart_avalanche", eChartType.Line);
-            chart.Title.Text = "Лавинный эффект";
-            chart.SetPosition(1, 0, 4, 0);
-            chart.SetSize(1200, 450);
-
-            string x_range = $"A2:A{row - 1}";
-            string y_range = $"B2:B{row - 1}";
-            var series = chart.Series.Add(sheet.Cells[y_range], sheet.Cells[x_range]);
-            series.Header = "Доля отличий";
-
-            chart.XAxis.Title.Text = "Длина исходного сообщения";
-            chart.YAxis.Title.Text = "Доля отличий";
         }
 
         static double Compute_entropy(Dictionary<char, long> symbol_counts, long total_ciphertext_symbols)

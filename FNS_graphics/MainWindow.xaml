@@ -9,6 +9,7 @@
         Height="760"
         Width="1000"
         MinHeight="680"
+        Loaded="Window_Loaded"
         MinWidth="860">
     <Window.Resources>
         <Style TargetType="Window">
@@ -108,7 +109,21 @@
 
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitleStyle}">Ключи гибридного шифрования ECDH</TextBlock>
+                        <Grid Margin="0,4,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Style="{StaticResource SectionTitleStyle}" Margin="0">Ключи гибридного шифрования ECDH</TextBlock>
+                            <CheckBox x:Name="AutoSenderKeyGenerationCheckBox"
+                                      Grid.Column="1"
+                                      Content="Автогенерация новых ключей"
+                                      IsChecked="True"
+                                      VerticalAlignment="Center"
+                                      Margin="12,0,0,0"
+                                      Checked="AutoSenderKeyGenerationChanged"
+                                      Unchecked="AutoSenderKeyGenerationChanged" />
+                        </Grid>
 
                         <TextBlock>Ключ отправителя (ECDH)</TextBlock>
                         <Grid Margin="0,0,0,8">

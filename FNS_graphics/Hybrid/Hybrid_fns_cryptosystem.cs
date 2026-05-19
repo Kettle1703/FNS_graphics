@@ -37,6 +37,27 @@ namespace FNS_rebuild
         public byte Curve_id { get; set; } = Hybrid_fns_cryptosystem.Curve_id_nist_p256;
     }
 
+    internal sealed class Hybrid_sender_context : IDisposable
+    {
+        // Контекст отправителя для режима без автогенерации.
+        // Позволяет переиспользовать одну и ту же ephemeral-пару и служебные параметры обёртки.
+        internal ECDiffieHellman Sender_private_key { get; }
+        internal byte[] Kdf_salt { get; }
+        internal byte[] Wrap_nonce { get; }
+
+        internal Hybrid_sender_context(ECDiffieHellman sender_private_key, byte[] kdf_salt, byte[] wrap_nonce)
+        {
+            Sender_private_key = sender_private_key ?? throw new ArgumentNullException(nameof(sender_private_key));
+            Kdf_salt = kdf_salt ?? throw new ArgumentNullException(nameof(kdf_salt));
+            Wrap_nonce = wrap_nonce ?? throw new ArgumentNullException(nameof(wrap_nonce));
+        }
+
+        public void Dispose()
+        {
+            Sender_private_key.Dispose();
+        }
+    }
+
     internal sealed class Hybrid_fns_cryptosystem
     {
         // Гибридный слой: ECDH -> HKDF-SHA256 -> master key -> подключи -> ФСС-шифрование.
@@ -77,7 +98,19 @@ namespace FNS_rebuild
             base_alphabet = Factorial_strategy.alphabet;
         }
 
-        internal Hybrid_cipher_package Encrypt(string source, byte[] receiver_public_key_spki, Cipher_options? options = null)
+        internal Hybrid_sender_context Create_sender_context()
+        {
+            ECDiffieHellman sender_private_key = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            byte[] kdf_salt = RandomNumberGenerator.GetBytes(Kdf_salt_bytes);
+            byte[] wrap_nonce = RandomNumberGenerator.GetBytes(Aes_gcm_nonce_bytes);
+            return new Hybrid_sender_context(sender_private_key, kdf_salt, wrap_nonce);
+        }
+
+        internal Hybrid_cipher_package Encrypt(
+            string source,
+            byte[] receiver_public_key_spki,
+            Cipher_options? options = null,
+            Hybrid_sender_context? sender_context = null)
         {
             // Шифрование гибридной схемой.
             // На выходе формируется пакет, содержащий:
@@ -87,49 +120,65 @@ namespace FNS_rebuild
             options ??= Cipher_options.Default;
 
             // Ephemeral-static ECDH:
-            // 1) отправитель создаёт временную пару;
+            // 1) отправитель использует либо временную пару на один пакет,
+            //    либо переданный фиксированный контекст отправителя;
             // 2) использует публичный ключ получателя;
-            // 3) получает shared secret только для этого сообщения.
-            using ECDiffieHellman sender_ephemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            using ECDiffieHellman receiver_public_holder = ECDiffieHellman.Create();
-            receiver_public_holder.ImportSubjectPublicKeyInfo(receiver_public_key_spki, out int read);
-            if (read != receiver_public_key_spki.Length)
-                throw new CryptographicException("Не удалось полностью прочитать публичный ключ получателя (SPKI).");
+            // 3) получает shared secret для текущей операции.
+            ECDiffieHellman? local_sender_ephemeral = null;
+            ECDiffieHellman sender_ephemeral = sender_context is null
+                ? local_sender_ephemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
+                : sender_context.Sender_private_key;
 
-            byte[] shared_secret = sender_ephemeral.DeriveKeyMaterial(receiver_public_holder.PublicKey);
-            byte[] kdf_salt = RandomNumberGenerator.GetBytes(Kdf_salt_bytes);
-            byte[] master_key = Derive_master_key(shared_secret, kdf_salt);
-            byte[] fss_seed = Derive_fss_seed(master_key);
-            byte[] key_encryption_key = Derive_key_encryption_key(master_key);
-
-            // На каждый пакет создаётся собственный перемешанный алфавит.
-            // Словари соответствий пересобираются заново и не переиспользуются между сообщениями.
-            string shuffled_alphabet = Build_shuffled_alphabet(base_alphabet, master_key);
-            Strategy_wrapper local_wrapper = Build_local_wrapper(shuffled_alphabet);
-
-            // Симметрический ключ для текущего ФСС-ядра генерируется автоматически из seed.
-            string auto_fss_key = Derive_fss_subkey_stream(fss_seed, Derived_fss_key_symbols, shuffled_alphabet);
-            Cipher_options effective_options = new()
+            try
             {
-                Block_plain_text_length = options.Block_plain_text_length,
-                Key = auto_fss_key
-            };
+                using ECDiffieHellman receiver_public_holder = ECDiffieHellman.Create();
+                receiver_public_holder.ImportSubjectPublicKeyInfo(receiver_public_key_spki, out int read);
+                if (read != receiver_public_key_spki.Length)
+                    throw new CryptographicException("Не удалось полностью прочитать публичный ключ получателя (SPKI).");
 
-            string fss_ciphertext = local_wrapper.Encrypt(source, effective_options);
+                byte[] shared_secret = sender_ephemeral.DeriveKeyMaterial(receiver_public_holder.PublicKey);
+                byte[] kdf_salt = sender_context?.Kdf_salt ?? RandomNumberGenerator.GetBytes(Kdf_salt_bytes);
+                byte[] master_key = Derive_master_key(shared_secret, kdf_salt);
+                byte[] fss_seed = Derive_fss_seed(master_key);
+                byte[] key_encryption_key = Derive_key_encryption_key(master_key);
 
-            // Отдельно шифруем seed (симметрический материал) через KEK,
-            // чтобы передавать его в пакете как encrypted_symmetric_key.
-            byte[] encrypted_symmetric_key = Wrap_symmetric_seed(fss_seed, key_encryption_key, kdf_salt);
-            byte[] ephemeral_public_key_spki = sender_ephemeral.ExportSubjectPublicKeyInfo();
+                // На каждый пакет создаётся собственный перемешанный алфавит.
+                // Словари соответствий пересобираются заново и не переиспользуются между сообщениями.
+                string shuffled_alphabet = Build_shuffled_alphabet(base_alphabet, master_key);
+                Strategy_wrapper local_wrapper = Build_local_wrapper(shuffled_alphabet);
 
-            return new Hybrid_cipher_package
+                // Симметрический ключ для текущего ФСС-ядра генерируется автоматически из seed.
+                string auto_fss_key = Derive_fss_subkey_stream(fss_seed, Derived_fss_key_symbols, shuffled_alphabet);
+                Cipher_options effective_options = new()
+                {
+                    Block_plain_text_length = options.Block_plain_text_length,
+                    Key = auto_fss_key
+                };
+
+                string fss_ciphertext = local_wrapper.Encrypt(source, effective_options);
+
+                // Отдельно шифруем seed (симметрический материал) через KEK,
+                // чтобы передавать его в пакете как encrypted_symmetric_key.
+                byte[] encrypted_symmetric_key = Wrap_symmetric_seed(
+                    fss_seed,
+                    key_encryption_key,
+                    kdf_salt,
+                    sender_context?.Wrap_nonce);
+                byte[] ephemeral_public_key_spki = sender_ephemeral.ExportSubjectPublicKeyInfo();
+
+                return new Hybrid_cipher_package
+                {
+                    Ciphertext = fss_ciphertext,
+                    Encrypted_symmetric_key = Convert.ToBase64String(encrypted_symmetric_key),
+                    Ephemeral_public_key = Convert.ToBase64String(ephemeral_public_key_spki),
+                    Block_plain_text_length = options.Block_plain_text_length,
+                    Curve_id = Curve_id_nist_p256
+                };
+            }
+            finally
             {
-                Ciphertext = fss_ciphertext,
-                Encrypted_symmetric_key = Convert.ToBase64String(encrypted_symmetric_key),
-                Ephemeral_public_key = Convert.ToBase64String(ephemeral_public_key_spki),
-                Block_plain_text_length = options.Block_plain_text_length,
-                Curve_id = Curve_id_nist_p256
-            };
+                local_sender_ephemeral?.Dispose();
+            }
         }
 
         internal string Decrypt(Hybrid_cipher_package packet, ECDiffieHellman receiver_private_key)
@@ -193,11 +242,19 @@ namespace FNS_rebuild
             return Hkdf_sha256(master_key, [], info, Fss_seed_bytes);
         }
 
-        static byte[] Wrap_symmetric_seed(byte[] fss_seed, byte[] key_encryption_key, byte[] kdf_salt)
+        static byte[] Wrap_symmetric_seed(
+            byte[] fss_seed,
+            byte[] key_encryption_key,
+            byte[] kdf_salt,
+            byte[]? forced_nonce = null)
         {
             // Обёртка симметрического seed через AES-GCM:
             // в payload сохраняются salt, nonce, tag и ciphertext.
-            byte[] nonce = RandomNumberGenerator.GetBytes(Aes_gcm_nonce_bytes);
+            byte[] nonce = forced_nonce is null
+                ? RandomNumberGenerator.GetBytes(Aes_gcm_nonce_bytes)
+                : forced_nonce.ToArray();
+            if (nonce.Length != Aes_gcm_nonce_bytes)
+                throw new CryptographicException($"Некорректная длина nonce для обёртки seed: {nonce.Length}.");
             byte[] ciphertext = new byte[fss_seed.Length];
             byte[] tag = new byte[Aes_gcm_tag_bytes];
             byte[] aad = Build_wrap_aad(kdf_salt);

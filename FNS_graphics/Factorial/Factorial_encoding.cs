@@ -12,7 +12,7 @@ namespace FNS_rebuild
         public static Dictionary<char, Digit> char_to_number = [];  // связь символа из алфавита и его порядкового номера в алфавите
 
         // [НЕ ИСПОЛЬЗУЕТСЯ В ТЕКУЩЕЙ ВЕРСИИ]
-        // Поля factorial_table, factorial_base, factorial_length_to_index и методы Create_factorial_table,
+        // Поля factorial_table, factorial_length_to_index и методы Create_factorial_table,
         // Rebuild_length_index, Convert_to_int нужны были старой реализации Convert_to_factorial_system,
         // которая раскладывала число делением на убывающие факториалы.
         // После перехода на алгоритм "снизу вверх" (Long_math.Divide_by_int с возрастающим делителем)
@@ -20,51 +20,26 @@ namespace FNS_rebuild
         // Оставлены для будущих стратегий, диагностики (Analysis.Print_factorial_table) или экспериментов.
 
         public static List<Digit[]> factorial_table = [];  // [НЕ ИСПОЛЬЗУЕТСЯ] вектор всех факториалов
-        public static Digit factorial_base = 0;  // [НЕ ИСПОЛЬЗУЕТСЯ] основание системы счисления, в которой посчитана таблица факториалов
         public static Dictionary<int, int> factorial_length_to_index = [];  // [НЕ ИСПОЛЬЗУЕТСЯ] связывает длину факториала и индекс в таблице факториалов
 
         // [НЕ ИСПОЛЬЗУЕТСЯ В ТЕКУЩЕЙ ВЕРСИИ] см. блок-комментарий выше
-        public static void Create_factorial_table(int max_length)
+        public static void Create_factorial_table(int max_factorial_index)
         {
-            // создаёт или продолжает таблицу факториалов до длины max_length разрядов
-            if (max_length < 1)
+            // Пересоздаёт таблицу факториалов от 1! до max_factorial_index!.
+            if (max_factorial_index < 1)
                 return;
 
-            if (factorial_base != Factorial_strategy.power)
-            {
-                // если основание системы счисления таблицы факториалов не совпадает с текущим основание
-                factorial_table.Clear();
-                factorial_length_to_index.Clear();
-                factorial_base = Factorial_strategy.power;
-            }
+            factorial_table.Clear();
+            factorial_length_to_index.Clear();
 
-            Digit[] current;
-            int n;
+            Digit[] current = [1];
+            factorial_table.Add(current);
 
-            if (factorial_table.Count == 0)
-            {
-                current = [1];
-                factorial_table.Add(current);
-                n = 2;
-            }
-            else
-            {
-                current = factorial_table[^1];
-                n = factorial_table.Count + 1;
-            }
-
-            if (current.Length > max_length)
-                return;
-
-            while (n <= Digit.MaxValue)
+            for (int n = 2; n <= max_factorial_index; n++)
             {
                 Digit[] next = Long_math.Multiply_by_digit(current, (Digit)n, 0);
-                if (next.Length > max_length)
-                    break;
-
                 factorial_table.Add(next);
                 current = next;
-                n++;
             }
 
             Rebuild_length_index();

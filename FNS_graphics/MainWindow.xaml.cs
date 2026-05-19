@@ -27,20 +27,20 @@ namespace FNS_graphics
         private static readonly string ReceiverPublicKeyPath = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_public.spki.b64");
         private const int DefaultBlockLength = 1096;
 
-        private readonly Strategy_wrapper _wrapper;
-        private readonly Hybrid_fns_cryptosystem _hybrid;
+        private Strategy_wrapper? _wrapper;
+        private Hybrid_fns_cryptosystem? _hybrid;
         private readonly ECDiffieHellman _receiverPrivateKey;
         private readonly byte[] _receiverPublicKeySpki;
         private readonly List<TextBox> _highlightedTextBoxes = [];
+        private Hybrid_sender_context? _manualSenderContext;
         private const string AutoPlaceholder = "<заполняется автоматически>";
 
         public MainWindow()
         {
+            // Инициализирует окно и базовые поля интерфейса.
             InitializeComponent();
 
-            _wrapper = new Strategy_wrapper(new Factorial_strategy());
-            _hybrid = new Hybrid_fns_cryptosystem(_wrapper);
-            _receiverPrivateKey = LoadOrCreateReceiverPrivateKey();
+            _receiverPrivateKey = Receiver_key_store.LoadOrCreate(ReceiverPrivateKeyPath, ReceiverPublicKeyPath);
             _receiverPublicKeySpki = _receiverPrivateKey.ExportSubjectPublicKeyInfo();
 
             SharedSenderPublicKeyTextBox.Text = AutoPlaceholder;
@@ -55,12 +55,15 @@ namespace FNS_graphics
 
         protected override void OnClosed(EventArgs e)
         {
+            // Освобождает ресурсы окна при закрытии.
+            DisposeManualSenderContext();
             _receiverPrivateKey.Dispose();
             base.OnClosed(e);
         }
 
         private void CopyField_Click(object sender, RoutedEventArgs e)
         {
+            // Копирует содержимое выбранного поля в буфер обмена.
             ClearPersistentHighlights();
 
             if (sender is not Button { Tag: TextBox source })
@@ -79,56 +82,95 @@ namespace FNS_graphics
 
         private void EncryptCommand_Executed(object sender, ExecutedRoutedEventArgs e)
         {
+            // Запускает шифрование по команде клавиатуры.
             Encrypt_Click(sender, new RoutedEventArgs());
         }
 
         private void DecryptCommand_Executed(object sender, ExecutedRoutedEventArgs e)
         {
+            // Запускает дешифрование по команде клавиатуры.
             Decrypt_Click(sender, new RoutedEventArgs());
+        }
+
+        private void Window_Loaded(object sender, RoutedEventArgs e)
+        {
+            // Загружает словари шифрования после отображения окна.
+            try
+            {
+                Factorial_strategy.Warm_up();
+                StatusTextBlock.Text = "Словари шифрования загружены.";
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = $"Ошибка загрузки словарей: {ex.Message}";
+            }
+        }
+
+        private void AutoSenderKeyGenerationChanged(object sender, RoutedEventArgs e)
+        {
+            // Переключает режим генерации ключа отправителя.
+            if (!IsLoaded)
+                return;
+
+            if (IsAutoSenderKeyGenerationEnabled())
+            {
+                DisposeManualSenderContext();
+                StatusTextBlock.Text = "Автогенерация новых ключей отправителя включена.";
+                return;
+            }
+
+            if (!EnsureHybridReady())
+                return;
+
+            _manualSenderContext ??= _hybrid!.Create_sender_context();
+            StatusTextBlock.Text = "Автогенерация отключена. Ключ отправителя и защищённый сеансовый ключ будут постоянными.";
         }
 
         private void Encrypt_Click(object sender, RoutedEventArgs e)
         {
+            // Выполняет шифрование и заполняет поля передачи.
             ClearPersistentHighlights();
+            if (!EnsureHybridReady())
+                return;
+
+            if (!Window_input_validation.TryBuildEncryptRequest(
+                    SourceTextBox.Text,
+                    SharedReceiverPublicKeyTextBox.Text,
+                    _receiverPublicKeySpki,
+                    DefaultBlockLength,
+                    AutoPlaceholder,
+                    out Encrypt_request request,
+                    out string validation_error))
+            {
+                StatusTextBlock.Text = validation_error;
+                return;
+            }
 
             try
             {
-                string source = SourceTextBox.Text ?? string.Empty;
-                if (string.IsNullOrEmpty(source))
-                {
-                    StatusTextBlock.Text = "Введите исходный текст для шифрования.";
-                    return;
-                }
-
-                string receiverPublicBase64 = SharedReceiverPublicKeyTextBox.Text?.Trim() ?? string.Empty;
-                byte[] receiverPublicSpki = string.IsNullOrEmpty(receiverPublicBase64) || receiverPublicBase64 == AutoPlaceholder
-                    ? _receiverPublicKeySpki
-                    : Convert.FromBase64String(receiverPublicBase64);
-                Cipher_options options = new()
-                {
-                    Block_plain_text_length = DefaultBlockLength,
-                    Key = string.Empty
-                };
+                Hybrid_sender_context? senderContext = IsAutoSenderKeyGenerationEnabled()
+                    ? null
+                    : GetOrCreateManualSenderContext();
 
                 Stopwatch watch = Stopwatch.StartNew();
-                Hybrid_cipher_package packet = _hybrid.Encrypt(source, receiverPublicSpki, options);
+                Hybrid_cipher_package packet = _hybrid!.Encrypt(
+                    request.Source_text,
+                    request.Receiver_public_spki,
+                    request.Options,
+                    senderContext);
                 watch.Stop();
 
                 TransferCipherTextTextBox.Text = packet.Ciphertext;
                 SharedSenderPublicKeyTextBox.Text = packet.Ephemeral_public_key;
                 SharedSessionKeyTextBox.Text = packet.Encrypted_symmetric_key;
 
-                EncryptMetricsTextBlock.Text = $"Время: {watch.Elapsed.TotalMilliseconds:F2} мс | Длина: {source.Length}";
+                EncryptMetricsTextBlock.Text = $"Время: {watch.Elapsed.TotalMilliseconds:F2} мс | Длина: {request.Source_text.Length}";
                 MarkPersistentHighlights(
                     TransferCipherTextTextBox,
                     SharedSenderPublicKeyTextBox,
                     SharedSessionKeyTextBox);
 
                 StatusTextBlock.Text = "Шифрование выполнено. Данные для передачи заполнены в общем блоке.";
-            }
-            catch (FormatException)
-            {
-                StatusTextBlock.Text = "Публичный ключ получателя должен быть в формате Base64.";
             }
             catch (Exception ex)
             {
@@ -138,53 +180,34 @@ namespace FNS_graphics
 
         private void Decrypt_Click(object sender, RoutedEventArgs e)
         {
+            // Выполняет дешифрование и записывает исходный текст.
             ClearPersistentHighlights();
+            if (!EnsureHybridReady())
+                return;
+
+            if (!Window_input_validation.TryBuildDecryptPacket(
+                    TransferCipherTextTextBox.Text,
+                    SharedSenderPublicKeyTextBox.Text,
+                    SharedSessionKeyTextBox.Text,
+                    DefaultBlockLength,
+                    AutoPlaceholder,
+                    out Hybrid_cipher_package packet,
+                    out string validation_error))
+            {
+                StatusTextBlock.Text = validation_error;
+                return;
+            }
 
             try
             {
-                string ciphertext = TransferCipherTextTextBox.Text ?? string.Empty;
-                string senderPublicKey = SharedSenderPublicKeyTextBox.Text?.Trim() ?? string.Empty;
-                string encryptedSymmetricKey = SharedSessionKeyTextBox.Text?.Trim() ?? string.Empty;
-
-                if (string.IsNullOrWhiteSpace(ciphertext) || ciphertext.StartsWith("<"))
-                {
-                    StatusTextBlock.Text = "Поле шифротекста не заполнено.";
-                    return;
-                }
-
-                if (string.IsNullOrWhiteSpace(senderPublicKey) || senderPublicKey == AutoPlaceholder)
-                {
-                    StatusTextBlock.Text = "Поле ключа отправителя не заполнено.";
-                    return;
-                }
-
-                if (string.IsNullOrWhiteSpace(encryptedSymmetricKey) || encryptedSymmetricKey == AutoPlaceholder)
-                {
-                    StatusTextBlock.Text = "Поле защищённого сеансового ключа не заполнено.";
-                    return;
-                }
-
-                Hybrid_cipher_package packet = new()
-                {
-                    Ciphertext = ciphertext,
-                    Ephemeral_public_key = senderPublicKey,
-                    Encrypted_symmetric_key = encryptedSymmetricKey,
-                    Block_plain_text_length = DefaultBlockLength,
-                    Curve_id = Hybrid_fns_cryptosystem.Curve_id_nist_p256
-                };
-
                 Stopwatch watch = Stopwatch.StartNew();
-                string decrypted = _hybrid.Decrypt(packet, _receiverPrivateKey);
+                string decrypted = _hybrid!.Decrypt(packet, _receiverPrivateKey);
                 watch.Stop();
 
                 SourceTextBox.Text = decrypted;
-                DecryptMetricsTextBlock.Text = $"Время: {watch.Elapsed.TotalMilliseconds:F2} мс | Длина: {ciphertext.Length}";
+                DecryptMetricsTextBlock.Text = $"Время: {watch.Elapsed.TotalMilliseconds:F2} мс | Длина: {packet.Ciphertext.Length}";
                 MarkPersistentHighlights(SourceTextBox);
                 StatusTextBlock.Text = "Дешифрование выполнено. Текст записан в поле «Исходный текст».";
-            }
-            catch (FormatException)
-            {
-                StatusTextBlock.Text = "Ключи пакета должны быть в формате Base64.";
             }
             catch (Exception ex)
             {
@@ -194,6 +217,7 @@ namespace FNS_graphics
 
         private void MarkPersistentHighlights(params TextBox[] textBoxes)
         {
+            // Подсвечивает поля с обновлёнными данными.
             Brush highlightBackground = new SolidColorBrush(Color.FromRgb(236, 249, 234));
             Brush highlightBorder = new SolidColorBrush(Color.FromRgb(92, 151, 112));
 
@@ -208,6 +232,7 @@ namespace FNS_graphics
 
         private void ClearPersistentHighlights()
         {
+            // Снимает подсветку с ранее отмеченных полей.
             if (_highlightedTextBoxes.Count == 0)
                 return;
 
@@ -224,35 +249,44 @@ namespace FNS_graphics
             _highlightedTextBoxes.Clear();
         }
 
-        private static ECDiffieHellman LoadOrCreateReceiverPrivateKey()
+        private Hybrid_sender_context GetOrCreateManualSenderContext()
         {
-            if (File.Exists(ReceiverPrivateKeyPath))
-            {
-                string privateB64 = File.ReadAllText(ReceiverPrivateKeyPath).Trim();
-                byte[] privateBytes = Convert.FromBase64String(privateB64);
-
-                ECDiffieHellman imported = ECDiffieHellman.Create();
-                imported.ImportPkcs8PrivateKey(privateBytes, out int read);
-                if (read != privateBytes.Length)
-                    throw new CryptographicException("Не удалось полностью прочитать приватный ECDH-ключ получателя.");
-
-                if (!File.Exists(ReceiverPublicKeyPath))
-                {
-                    byte[] publicBytes = imported.ExportSubjectPublicKeyInfo();
-                    File.WriteAllText(ReceiverPublicKeyPath, Convert.ToBase64String(publicBytes));
-                }
-
-                return imported;
-            }
-
-            ECDiffieHellman created = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            byte[] privateKey = created.ExportPkcs8PrivateKey();
-            byte[] publicKey = created.ExportSubjectPublicKeyInfo();
-
-            File.WriteAllText(ReceiverPrivateKeyPath, Convert.ToBase64String(privateKey));
-            File.WriteAllText(ReceiverPublicKeyPath, Convert.ToBase64String(publicKey));
-
-            return created;
+            // Возвращает сохранённый контекст отправителя или создаёт новый.
+            _manualSenderContext ??= _hybrid!.Create_sender_context();
+            return _manualSenderContext;
         }
+
+        private bool EnsureHybridReady()
+        {
+            // Лениво создаёт шифровальный модуль при первом использовании.
+            if (_hybrid is not null)
+                return true;
+
+            try
+            {
+                _wrapper = new Strategy_wrapper(new Factorial_strategy());
+                _hybrid = new Hybrid_fns_cryptosystem(_wrapper);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = $"Ошибка инициализации шифровального модуля: {ex.Message}";
+                return false;
+            }
+        }
+
+        private bool IsAutoSenderKeyGenerationEnabled()
+        {
+            // Возвращает текущий режим автогенерации ключей отправителя.
+            return AutoSenderKeyGenerationCheckBox.IsChecked != false;
+        }
+
+        private void DisposeManualSenderContext()
+        {
+            // Освобождает сохранённый контекст отправителя.
+            _manualSenderContext?.Dispose();
+            _manualSenderContext = null;
+        }
+
     }
 }

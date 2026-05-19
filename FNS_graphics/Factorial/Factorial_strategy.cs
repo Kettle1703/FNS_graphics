@@ -18,7 +18,7 @@ namespace FNS_rebuild
         internal static Dictionary<byte, char> byte_to_char = [];  // связь байта и символа алфавита
         internal static Dictionary<char, byte> char_to_byte = [];  // обратная связь символа и байта
 
-        const int Max_factorial = 1024;  // старший используемый факториал: 1024!
+        const int Max_factorial_index = 1023;  // таблица факториалов строится до 1023!
         const int Max_control_bits_per_coef = 2;  // максимум служебных бит на коэффициент сжатия
         const int Max_control_code = 3;  // 00 -> +0, 01 -> +256, 10 -> +512, 11 -> +768
         const int Compression_free_factorial_coefficients = 255;  // первые 255 коэффициентов ФСС всегда <= 255 и не требуют коэффициентов сжатия
@@ -34,6 +34,7 @@ namespace FNS_rebuild
         // Словарь худших чисел: длина исходной строки -> число power^L - 1.
         // Нужен для быстрого повторного расчёта K(L) для уже встречавшихся длин.
         internal static Dictionary<int, Digit[]> source_length_to_worst_number = [];
+        static bool precomputed_tables_ready = false;
 
         // Термины этого класса:
         // коэффициенты длины: два первых служебных коэффициента (младший и старший байты длины исходной строки);
@@ -58,6 +59,14 @@ namespace FNS_rebuild
 
         }
 
+        internal static void Warm_up()
+        {
+            if (precomputed_tables_ready)
+                return;
+
+            _ = new Factorial_strategy();
+        }
+
         internal Factorial_strategy(string input)
         {
             // Конструктор с пользовательским алфавитом: строит таблицы соответствий символ <-> число.
@@ -69,8 +78,6 @@ namespace FNS_rebuild
             Factorial_decoding.number_to_char.Clear();
             byte_to_char.Clear();
             char_to_byte.Clear();
-            source_length_to_factorial_coefficients_count.Clear();
-            source_length_to_worst_number.Clear();
             Coefficient_diffusion.Clear_key_cache();
 
             Digit counter = 0;
@@ -102,6 +109,8 @@ namespace FNS_rebuild
                 }
                 WriteLine(output.ToString());
             }
+
+            Ensure_precomputed_tables();
         }
 
         public string Encrypt(string input, Cipher_options options)
@@ -435,14 +444,8 @@ namespace FNS_rebuild
 
         static int Get_required_factorial_coefficients_count(int source_text_length)
         {
-            // Возвращает K(L) из словаря, при отсутствии — вычисляет и кэширует.
-
-            if (source_length_to_factorial_coefficients_count.TryGetValue(source_text_length, out int cached))
-                return cached;
-
-            int calculated = Calculate_required_factorial_coefficients_count(source_text_length);
-            source_length_to_factorial_coefficients_count[source_text_length] = calculated;
-            return calculated;
+            // Возвращает K(L) из заранее заполненного словаря.
+            return source_length_to_factorial_coefficients_count[source_text_length];
         }
 
         static int Calculate_required_factorial_coefficients_count(int source_text_length)
@@ -456,14 +459,8 @@ namespace FNS_rebuild
 
         static Digit[] Get_worst_number_for_source_length(int source_text_length)
         {
-            // Возвращает худшее число для длины L из словаря, при отсутствии — создаёт и кэширует.
-
-            if (source_length_to_worst_number.TryGetValue(source_text_length, out Digit[]? cached) && cached is not null)
-                return cached;
-
-            Digit[] created = Build_worst_number_for_source_length(source_text_length);
-            source_length_to_worst_number[source_text_length] = created;
-            return created;
+            // Возвращает худшее число для длины L из заранее заполненного словаря.
+            return source_length_to_worst_number[source_text_length];
         }
 
         static Digit[] Build_worst_number_for_source_length(int source_text_length)
@@ -514,6 +511,26 @@ namespace FNS_rebuild
             // Здесь только удаление повторов на случай ручного редактирования строки.
 
             return Unique_alphabet(Seed_alphabet);
+        }
+
+        static void Ensure_precomputed_tables()
+        {
+            if (precomputed_tables_ready)
+                return;
+
+            Factorial_encoding.Create_factorial_table(Max_factorial_index);
+
+            source_length_to_worst_number.Clear();
+            source_length_to_factorial_coefficients_count.Clear();
+
+            for (int length = 1; length <= Max_source_length_without_blocks; length++)
+            {
+                Digit[] worst_number = Build_worst_number_for_source_length(length);
+                source_length_to_worst_number[length] = worst_number;
+                source_length_to_factorial_coefficients_count[length] = Calculate_required_factorial_coefficients_count(length);
+            }
+
+            precomputed_tables_ready = true;
         }
     }
 }

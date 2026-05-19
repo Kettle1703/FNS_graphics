@@ -15,6 +15,7 @@ namespace FNS_rebuild
         internal const int Fast_block_plain_text_length = 1096;  // Длина открытого блока, которая используется в авто-режиме после 1096.
         internal const int Fast_tests_per_length = 1;  // Количество раундов на одну длину; рост этого числа сильно замедляет тест.
         internal const int Fast_progress_step = 500;  // Шаг печати прогресса по длинам; чем меньше шаг, тем медленнее из-за частого вывода в консоль.
+        internal const int Fast_length_step = 1;  // Шаг перебора длин в быстром профиле.
 
         internal static bool Run_fast_profile(Strategy_wrapper wrapper)
         {
@@ -28,6 +29,7 @@ namespace FNS_rebuild
                 max_length: Fast_max_length_with_blocks,
                 tests_per_length: Fast_tests_per_length,
                 progress_step: Fast_progress_step,
+                length_step: Fast_length_step,
                 options: null);
         }
 
@@ -39,6 +41,26 @@ namespace FNS_rebuild
             int progress_step,
             Cipher_options? options = null)
         {
+            // Совместимая перегрузка с шагом длины по умолчанию (1).
+            return Run_round_trip_tests(
+                wrapper,
+                min_length,
+                max_length,
+                tests_per_length,
+                progress_step,
+                length_step: 1,
+                options);
+        }
+
+        internal static bool Run_round_trip_tests(
+            Strategy_wrapper wrapper,
+            int min_length,
+            int max_length,
+            int tests_per_length,
+            int progress_step,
+            int length_step,
+            Cipher_options? options = null)
+        {
             // Для каждой длины генерирует tests_per_length строк,
             // выполняет Encrypt -> Decrypt и сравнивает с исходной строкой.
             // При первой ошибке сразу завершает тестирование.
@@ -46,14 +68,15 @@ namespace FNS_rebuild
             // Если options == null, метод сам выбирает режим по длине:
             // длины до Fast_max_length_without_blocks шифруются без блоков,
             // более длинные строки — в блочном режиме.
+            Validate_round_trip_parameters(min_length, max_length, tests_per_length, progress_step, length_step);
 
-            int total_lengths = max_length - min_length + 1;
+            int total_lengths = Calculate_total_lengths(min_length, max_length, length_step);
             int total_tests = total_lengths * tests_per_length;
             int passed_tests = 0;
 
-            WriteLine(Build_start_report(min_length, max_length, tests_per_length, total_tests));
+            WriteLine(Build_start_report(min_length, max_length, tests_per_length, length_step, total_tests));
 
-            for (int length = min_length; length <= max_length; length++)
+            for (int length = min_length; length <= max_length; length += length_step)
             {
                 Cipher_options effective_options = options ?? Build_auto_options_for_length(length);
 
@@ -81,14 +104,44 @@ namespace FNS_rebuild
                     passed_tests++;
                 }
 
-                int processed_lengths = length - min_length + 1;
-                if (processed_lengths % progress_step == 0 || length == max_length)
+                int processed_lengths = ((length - min_length) / length_step) + 1;
+                if (processed_lengths % progress_step == 0 || processed_lengths == total_lengths)
                     WriteLine(Build_progress_report(length, passed_tests, total_tests));
             }
 
             WriteLine(Build_success_report(passed_tests, total_tests));
             Finish_signal();
             return true;
+        }
+
+        static void Validate_round_trip_parameters(
+            int min_length,
+            int max_length,
+            int tests_per_length,
+            int progress_step,
+            int length_step)
+        {
+            // Проверяет корректность параметров запуска стохастического теста.
+            if (min_length < 1)
+                throw new ArgumentOutOfRangeException(nameof(min_length), "Минимальная длина должна быть >= 1.");
+
+            if (max_length < min_length)
+                throw new ArgumentOutOfRangeException(nameof(max_length), "Максимальная длина должна быть >= минимальной.");
+
+            if (tests_per_length < 1)
+                throw new ArgumentOutOfRangeException(nameof(tests_per_length), "Тестов на длину должно быть >= 1.");
+
+            if (progress_step < 1)
+                throw new ArgumentOutOfRangeException(nameof(progress_step), "Шаг прогресса должен быть >= 1.");
+
+            if (length_step < 1)
+                throw new ArgumentOutOfRangeException(nameof(length_step), "Шаг длины должен быть >= 1.");
+        }
+
+        static int Calculate_total_lengths(int min_length, int max_length, int length_step)
+        {
+            // Считает, сколько значений длины будет обработано с заданным шагом.
+            return ((max_length - min_length) / length_step) + 1;
         }
 
         static Cipher_options Build_auto_options_for_length(int length)
@@ -106,13 +159,14 @@ namespace FNS_rebuild
             };
         }
 
-        static string Build_start_report(int min_length, int max_length, int tests_per_length, int total_tests)
+        static string Build_start_report(int min_length, int max_length, int tests_per_length, int length_step, int total_tests)
         {
             // Формирует стартовую сводку тестирования.
 
             System.Text.StringBuilder output = new();
             output.AppendLine("Стохастическое тестирование шифрования запущено.");
             output.AppendLine($"Диапазон длин: {min_length}..{max_length}");
+            output.AppendLine($"Шаг по длине: {length_step}");
             output.AppendLine($"Тестов на каждую длину: {tests_per_length}");
             output.Append($"Всего раундов шифрование -> дешифрование: {total_tests}");
             return output.ToString();
