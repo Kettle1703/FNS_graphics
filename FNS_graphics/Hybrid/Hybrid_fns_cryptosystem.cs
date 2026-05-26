@@ -25,6 +25,11 @@ namespace FNS_rebuild
         // Публичный ключ временной (ephemeral) ECC-пары отправителя в формате SPKI, Base64.
         // Нужен получателю, чтобы вычислить тот же shared secret и восстановить master key.
         //
+        // Ephemeral_public_key_signature:
+        // Цифровая подпись всего передаваемого пакета:
+        // (Ciphertext + Encrypted_symmetric_key + Ephemeral_public_key + служебные параметры).
+        // Формат: Base64, подпись ECDSA (DER), хеш SHA-256.
+        //
         // Block_plain_text_length:
         // Длина открытого блока ФСС. По ней восстанавливается режим разбиения на блоки.
         //
@@ -33,6 +38,7 @@ namespace FNS_rebuild
         public string Ciphertext { get; set; } = "";
         public string Encrypted_symmetric_key { get; set; } = "";
         public string Ephemeral_public_key { get; set; } = "";
+        public string Ephemeral_public_key_signature { get; set; } = "";
         public int Block_plain_text_length { get; set; } = 0;
         public byte Curve_id { get; set; } = Hybrid_fns_cryptosystem.Curve_id_nist_p256;
     }

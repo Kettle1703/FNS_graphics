@@ -177,11 +177,11 @@ namespace FNS_graphics
 
             uint output_code_page = GetConsoleOutputCP();
             if (output_code_page > 0)
-                Console.OutputEncoding = Encoding.GetEncoding((int)output_code_page);
+                Console.OutputEncoding = Get_console_encoding_for_code_page((int)output_code_page);
 
             uint input_code_page = GetConsoleCP();
             if (input_code_page > 0)
-                Console.InputEncoding = Encoding.GetEncoding((int)input_code_page);
+                Console.InputEncoding = Get_console_encoding_for_code_page((int)input_code_page);
         }
 
         static void Rebind_standard_streams()
@@ -202,6 +202,15 @@ namespace FNS_graphics
                 return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
             return source;
+        }
+
+        static Encoding Get_console_encoding_for_code_page(int code_page)
+        {
+            // Возвращает кодировку консоли по code page и отключает BOM для UTF-8.
+            if (code_page == Encoding.UTF8.CodePage)
+                return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+            return Encoding.GetEncoding(code_page);
         }
 
         static string[] Extract_command_args(string[] args)

@@ -56,11 +56,11 @@
 
         <Style TargetType="Button">
             <Setter Property="Margin" Value="0,0,0,8" />
-            <Setter Property="MinWidth" Value="150" />
             <Setter Property="Height" Value="34" />
-            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Padding" Value="12,4,12,6" />
             <Setter Property="HorizontalAlignment" Value="Left" />
             <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="FontSize" Value="16" />
             <Setter Property="Background" Value="#FF70B07D" />
             <Setter Property="Foreground" Value="#FF193B26" />
@@ -81,28 +81,50 @@
 
     <Grid Margin="6">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel>
+            <StackPanel Grid.IsSharedSizeScope="True">
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitleStyle}">Шифрование</TextBlock>
-
-                        <TextBlock>Исходный текст</TextBlock>
-                        <Grid Margin="0,0,0,8">
+                        <Grid Margin="0,0,0,10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SourceTextBox" Grid.Column="0" />
-                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=SourceTextBox}" Margin="8,0,0,0" />
+                            <TextBlock Grid.Column="0" Style="{StaticResource SectionTitleStyle}" Margin="0">Шифрование</TextBlock>
+                            <CheckBox x:Name="BuildJsonFileCheckBox"
+                                      Grid.Column="1"
+                                      Content="Собрать JSON файл"
+                                      IsChecked="False"
+                                      VerticalAlignment="Center"
+                                      HorizontalAlignment="Right"
+                                      Margin="12,0,0,0" />
                         </Grid>
 
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="EncryptActionColumn" />
+                            </Grid.ColumnDefinitions>
+                            <Grid Grid.Column="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Margin="0">Исходный текст</TextBlock>
+                                <TextBlock x:Name="EncryptMetricsTextBlock"
+                                           Grid.Column="1"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           Margin="0"
+                                           Foreground="#FF3F5A45" />
+                            </Grid>
+                        </Grid>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="EncryptActionColumn" />
                             </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Content="Шифровать" Click="Encrypt_Click" MinWidth="150" Margin="0,0,10,0" />
-                            <TextBlock x:Name="EncryptMetricsTextBlock" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0" Foreground="#FF3F5A45" />
+                            <TextBox x:Name="SourceTextBox" Grid.Column="0" />
+                            <Button x:Name="EncryptButton" Grid.Column="1" Content="Шифровать" Click="Encrypt_Click" Margin="8,0,10,0" />
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -112,6 +134,7 @@
                         <Grid Margin="0,4,0,10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Style="{StaticResource SectionTitleStyle}" Margin="0">Ключи гибридного шифрования ECDH</TextBlock>
@@ -123,37 +146,26 @@
                                       Margin="12,0,0,0"
                                       Checked="AutoSenderKeyGenerationChanged"
                                       Unchecked="AutoSenderKeyGenerationChanged" />
+                            <Button Grid.Column="2"
+                                    Content="Цифровая подпись"
+                                    Click="DigitalSignatureSettingsButton_Click"
+                                    Margin="10,0,0,0"
+                                    Background="#FF6FAAE6"
+                                    BorderBrush="#FF567DA2"
+                                    Foreground="#FF1A3348" />
                         </Grid>
 
-                        <TextBlock>Ключ отправителя (ECDH)</TextBlock>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SharedSenderPublicKeyTextBox" Grid.Column="0" />
-                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=SharedSenderPublicKeyTextBox}" Margin="8,0,0,0" />
-                        </Grid>
+                        <TextBlock>Публичный ключ отправителя (ECDH)</TextBlock>
+                        <TextBox x:Name="SharedSenderPublicKeyTextBox" Margin="0,0,0,8" />
 
-                        <TextBlock>Ключ получателя (ECDH)</TextBlock>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SharedReceiverPublicKeyTextBox" Grid.Column="0" />
-                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=SharedReceiverPublicKeyTextBox}" Margin="8,0,0,0" />
-                        </Grid>
+                        <TextBlock>Подпись пакета отправителя (ECDSA)</TextBlock>
+                        <TextBox x:Name="SharedSenderPublicKeySignatureTextBox" Margin="0,0,0,8" />
+
+                        <TextBlock>Публичный ключ получателя (ECDH)</TextBlock>
+                        <TextBox x:Name="SharedReceiverPublicKeyTextBox" Margin="0,0,0,8" />
 
                         <TextBlock>Зашифрованный по ECC ключ для симметричного шифрования</TextBlock>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SharedSessionKeyTextBox" Grid.Column="0" IsReadOnly="True" />
-                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=SharedSessionKeyTextBox}" Margin="8,0,0,0" />
-                        </Grid>
+                        <TextBox x:Name="SharedSessionKeyTextBox" IsReadOnly="True" Margin="0,0,0,8" />
 
                     </StackPanel>
                 </Border>
@@ -162,23 +174,32 @@
                     <StackPanel>
                         <TextBlock Style="{StaticResource SectionTitleStyle}">Дешифрование</TextBlock>
 
-                        <TextBlock>Шифротекст</TextBlock>
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="DecryptActionColumn" />
+                            </Grid.ColumnDefinitions>
+                            <Grid Grid.Column="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Margin="0">Шифротекст</TextBlock>
+                                <TextBlock x:Name="DecryptMetricsTextBlock"
+                                           Grid.Column="1"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           Margin="0"
+                                           Foreground="#FF3F5A45" />
+                            </Grid>
+                        </Grid>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="DecryptActionColumn" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="TransferCipherTextTextBox" Grid.Column="0" />
-                            <Button Grid.Column="1" Content="Копировать" Click="CopyField_Click" Tag="{Binding ElementName=TransferCipherTextTextBox}" Margin="8,0,0,0" />
-                        </Grid>
-
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Content="Дешифровать" Click="Decrypt_Click" MinWidth="150" Margin="0,0,10,0" />
-                            <TextBlock x:Name="DecryptMetricsTextBlock" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0" Foreground="#FF3F5A45" />
+                            <Button x:Name="DecryptButton" Grid.Column="1" Content="Дешифровать" Click="Decrypt_Click" Margin="8,0,10,0" />
                         </Grid>
                     </StackPanel>
                 </Border>

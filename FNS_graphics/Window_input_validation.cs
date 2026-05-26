@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using FNS_rebuild;
 
 namespace FNS_graphics
@@ -65,6 +65,7 @@ namespace FNS_graphics
             string? ciphertext_text,
             string? sender_public_key_text,
             string? encrypted_symmetric_key_text,
+            string? sender_public_key_signature_text,
             int block_plain_text_length,
             string auto_placeholder,
             out Hybrid_cipher_package packet,
@@ -74,6 +75,7 @@ namespace FNS_graphics
             string ciphertext = ciphertext_text ?? string.Empty;
             string sender_public_key = sender_public_key_text?.Trim() ?? string.Empty;
             string encrypted_symmetric_key = encrypted_symmetric_key_text?.Trim() ?? string.Empty;
+            string sender_public_key_signature = sender_public_key_signature_text?.Trim() ?? string.Empty;
 
             if (string.IsNullOrWhiteSpace(ciphertext) || ciphertext.StartsWith("<", StringComparison.Ordinal))
             {
@@ -85,7 +87,7 @@ namespace FNS_graphics
             if (string.IsNullOrWhiteSpace(sender_public_key) || sender_public_key == auto_placeholder)
             {
                 packet = null!;
-                error_message = "Поле ключа отправителя не заполнено.";
+                error_message = "Поле публичного ключа отправителя не заполнено.";
                 return false;
             }
 
@@ -100,7 +102,14 @@ namespace FNS_graphics
             if (!IsValidBase64(sender_public_key) || !IsValidBase64(encrypted_symmetric_key))
             {
                 packet = null!;
-                error_message = "Ключи пакета должны быть в формате Base64.";
+                error_message = "Поля ключей пакета должны быть в формате Base64.";
+                return false;
+            }
+
+            if (sender_public_key_signature.Length > 0 && sender_public_key_signature != auto_placeholder && !IsValidBase64(sender_public_key_signature))
+            {
+                packet = null!;
+                error_message = "Подпись пакета отправителя должна быть в формате Base64.";
                 return false;
             }
 
@@ -109,6 +118,9 @@ namespace FNS_graphics
                 Ciphertext = ciphertext,
                 Ephemeral_public_key = sender_public_key,
                 Encrypted_symmetric_key = encrypted_symmetric_key,
+                Ephemeral_public_key_signature = sender_public_key_signature == auto_placeholder
+                    ? string.Empty
+                    : sender_public_key_signature,
                 Block_plain_text_length = block_plain_text_length,
                 Curve_id = Hybrid_fns_cryptosystem.Curve_id_nist_p256
             };
