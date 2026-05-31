@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
@@ -14,13 +14,23 @@ namespace FNS_graphics
         public string Private_key_pkcs8 { get; set; } = string.Empty;
     }
 
+    internal sealed class Recipient_key_link_entry
+    {
+        public string Link_id { get; set; } = string.Empty;
+        public string Recipient_name { get; set; } = string.Empty;
+        public string Sender_signing_private_key_pkcs8 { get; set; } = string.Empty;
+        public string Sender_signing_public_key_spki { get; set; } = string.Empty;
+        public string Trusted_sender_signing_public_key { get; set; } = string.Empty;
+        public string Receiver_hybrid_public_key { get; set; } = string.Empty;
+    }
+
     internal sealed class Digital_signature_settings
     {
         public bool Sign_ciphertext { get; set; } = true;
+        public List<Recipient_key_link_entry> Recipient_links { get; set; } = [];
+        public string Active_recipient_link_id { get; set; } = string.Empty;
 
-        // Legacy поле оставлено для совместимости со старым файлом настроек.
-        public string Sender_long_term_public_key { get; set; } = string.Empty;
-
+        // Основная форма пока использует эти поля.
         public string Active_sender_signing_public_key { get; set; } = string.Empty;
         public List<Sender_signing_key_entry> Own_sender_signing_keys { get; set; } = [];
         public List<string> Trusted_sender_long_term_public_keys { get; set; } = [];
@@ -36,8 +46,6 @@ namespace FNS_graphics
             "crypto");
 
         static readonly string Settings_path = Path.Combine(Storage_directory_path, "digital_signature_settings.json");
-        static readonly string Legacy_sender_private_key_path = Path.Combine(Storage_directory_path, "sender_long_term_signing_private.pk8.b64");
-        static readonly string Legacy_sender_public_key_path = Path.Combine(Storage_directory_path, "sender_long_term_signing_public.spki.b64");
 
         static readonly JsonSerializerOptions Json_options = new()
         {
@@ -56,6 +64,15 @@ namespace FNS_graphics
             }
         }
 
+        internal static bool Has_configured_recipient_links()
+        {
+            lock (Sync_root)
+            {
+                Ensure_settings_loaded();
+                return settings.Recipient_links.Count > 0;
+            }
+        }
+
         internal static void Save_settings(Digital_signature_settings input)
         {
             ArgumentNullException.ThrowIfNull(input);
@@ -65,24 +82,119 @@ namespace FNS_graphics
                 Ensure_settings_loaded();
 
                 settings.Sign_ciphertext = input.Sign_ciphertext;
-                settings.Own_sender_signing_keys = Normalize_sender_signing_key_list(input.Own_sender_signing_keys);
-                settings.Active_sender_signing_public_key = Normalize_base64_text(input.Active_sender_signing_public_key);
-                settings.Trusted_sender_long_term_public_keys = Normalize_key_list(input.Trusted_sender_long_term_public_keys);
+                settings.Recipient_links = Normalize_recipient_link_list(input.Recipient_links);
+                settings.Active_recipient_link_id = Normalize_identifier(input.Active_recipient_link_id);
 
-                Ensure_active_sender_signing_key_selected();
-                settings.Sender_long_term_public_key = settings.Active_sender_signing_public_key;
-
+                Ensure_active_recipient_selected();
+                Synchronize_compatibility_fields_from_active_recipient();
                 Save_settings_file();
             }
         }
 
-        internal static Sender_signing_key_entry Generate_sender_long_term_key_pair_entry()
+        internal static Recipient_key_link_entry Generate_recipient_key_link_entry(string? recipient_name = null)
         {
             lock (Sync_root)
             {
                 Ensure_settings_loaded();
-                return Generate_new_signing_key_pair_entry();
+
+                HashSet<string> existing_names = new(StringComparer.Ordinal);
+                foreach (Recipient_key_link_entry link in settings.Recipient_links)
+                    existing_names.Add(link.Recipient_name);
+
+                string normalized_name = Normalize_recipient_name(recipient_name);
+                if (normalized_name.Length == 0)
+                    normalized_name = Build_random_recipient_name();
+
+                string unique_name = Ensure_unique_recipient_name(normalized_name, existing_names);
+                Sender_signing_key_entry sender_signing = Generate_new_signing_key_pair_entry();
+
+                return new Recipient_key_link_entry
+                {
+                    Link_id = Guid.NewGuid().ToString("N"),
+                    Recipient_name = unique_name,
+                    Sender_signing_private_key_pkcs8 = sender_signing.Private_key_pkcs8,
+                    Sender_signing_public_key_spki = sender_signing.Public_key,
+                    Trusted_sender_signing_public_key = Generate_sender_signing_public_key_spki_base64(),
+                    Receiver_hybrid_public_key = Generate_receiver_hybrid_public_key_spki_base64()
+                };
             }
+        }
+
+        internal static string Generate_sender_signing_public_key_spki_base64()
+        {
+            using ECDsa signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            return Convert.ToBase64String(signer.ExportSubjectPublicKeyInfo());
+        }
+
+        internal static string Generate_receiver_hybrid_public_key_spki_base64()
+        {
+            using ECDiffieHellman receiver = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            return Convert.ToBase64String(receiver.ExportSubjectPublicKeyInfo());
+        }
+
+        internal static bool Try_get_sender_signing_public_key_from_private(
+            string sender_signing_private_key_pkcs8,
+            out string sender_signing_public_key_spki,
+            out string error_message)
+        {
+            sender_signing_public_key_spki = string.Empty;
+            error_message = string.Empty;
+
+            string normalized_private = Normalize_base64_text(sender_signing_private_key_pkcs8);
+            if (normalized_private.Length == 0)
+            {
+                error_message = "Приватный ключ подписи отправителя пуст.";
+                return false;
+            }
+
+            if (!Try_decode_base64(normalized_private, out byte[] private_key_bytes))
+            {
+                error_message = "Приватный ключ подписи отправителя должен быть в формате Base64.";
+                return false;
+            }
+
+            try
+            {
+                using ECDsa signer = ECDsa.Create();
+                signer.ImportPkcs8PrivateKey(private_key_bytes, out int read);
+                if (read != private_key_bytes.Length)
+                {
+                    error_message = "Приватный ключ подписи отправителя прочитан не полностью.";
+                    return false;
+                }
+
+                sender_signing_public_key_spki = Convert.ToBase64String(signer.ExportSubjectPublicKeyInfo());
+                return true;
+            }
+            catch
+            {
+                error_message = "Приватный ключ подписи отправителя не похож на корректный PKCS8-ключ ECDSA.";
+                return false;
+            }
+        }
+
+        internal static bool Try_validate_sender_signing_public_key(string sender_signing_public_key_spki, out string error_message)
+        {
+            if (Try_validate_ecdsa_public_key(sender_signing_public_key_spki))
+            {
+                error_message = string.Empty;
+                return true;
+            }
+
+            error_message = "Публичный ключ подписи должен быть корректным SPKI-ключом ECDSA в формате Base64.";
+            return false;
+        }
+
+        internal static bool Try_validate_receiver_hybrid_public_key(string receiver_hybrid_public_key_spki, out string error_message)
+        {
+            if (Try_validate_ecdh_public_key(receiver_hybrid_public_key_spki))
+            {
+                error_message = string.Empty;
+                return true;
+            }
+
+            error_message = "Публичный ключ получателя для гибридного шифрования должен быть SPKI-ключом ECDH в формате Base64.";
+            return false;
         }
 
         internal static bool Try_sign_cipher_package(
@@ -152,7 +264,6 @@ namespace FNS_graphics
                     continue;
 
                 valid_key_count++;
-
                 if (Try_verify_signature_payload_with_sender_key(payload, signature, sender_public_key_spki))
                     return true;
             }
@@ -243,7 +354,6 @@ namespace FNS_graphics
                 return;
 
             Ensure_storage_directory_exists();
-
             settings = new Digital_signature_settings();
 
             if (File.Exists(Settings_path))
@@ -255,10 +365,8 @@ namespace FNS_graphics
                     if (parsed is not null)
                     {
                         settings.Sign_ciphertext = parsed.Sign_ciphertext;
-                        settings.Sender_long_term_public_key = Normalize_base64_text(parsed.Sender_long_term_public_key);
-                        settings.Active_sender_signing_public_key = Normalize_base64_text(parsed.Active_sender_signing_public_key);
-                        settings.Own_sender_signing_keys = Normalize_sender_signing_key_list(parsed.Own_sender_signing_keys);
-                        settings.Trusted_sender_long_term_public_keys = Normalize_key_list(parsed.Trusted_sender_long_term_public_keys);
+                        settings.Recipient_links = Normalize_recipient_link_list(parsed.Recipient_links);
+                        settings.Active_recipient_link_id = Normalize_identifier(parsed.Active_recipient_link_id);
                     }
                 }
                 catch
@@ -267,103 +375,95 @@ namespace FNS_graphics
                 }
             }
 
-            Try_migrate_legacy_sender_signing_key();
-            Ensure_default_sender_signing_key_pair();
-            Ensure_active_sender_signing_key_selected();
-
-            settings.Sender_long_term_public_key = settings.Active_sender_signing_public_key;
+            Ensure_active_recipient_selected();
+            Synchronize_compatibility_fields_from_active_recipient();
             Save_settings_file();
             settings_loaded = true;
         }
 
-        static void Try_migrate_legacy_sender_signing_key()
+        static void Ensure_active_recipient_selected()
         {
-            if (settings.Own_sender_signing_keys.Count > 0)
-                return;
-
-            string legacy_public_key = settings.Sender_long_term_public_key;
-            if (legacy_public_key.Length == 0)
-                legacy_public_key = Load_public_key_from_file(Legacy_sender_public_key_path);
-
-            if (legacy_public_key.Length == 0)
-                return;
-
-            if (!File.Exists(Legacy_sender_private_key_path))
-                return;
-
-            string legacy_private_key = Normalize_base64_text(File.ReadAllText(Legacy_sender_private_key_path));
-            if (!Try_decode_base64(legacy_private_key, out byte[] private_key_bytes))
-                return;
-
-            try
+            settings.Active_recipient_link_id = Normalize_identifier(settings.Active_recipient_link_id);
+            if (settings.Recipient_links.Count == 0)
             {
-                using ECDsa candidate = ECDsa.Create();
-                candidate.ImportPkcs8PrivateKey(private_key_bytes, out int read);
-                if (read != private_key_bytes.Length)
+                settings.Active_recipient_link_id = string.Empty;
+                return;
+            }
+
+            if (settings.Active_recipient_link_id.Length == 0)
+            {
+                settings.Active_recipient_link_id = settings.Recipient_links[0].Link_id;
+                return;
+            }
+
+            foreach (Recipient_key_link_entry link in settings.Recipient_links)
+            {
+                if (string.Equals(link.Link_id, settings.Active_recipient_link_id, StringComparison.Ordinal))
                     return;
             }
-            catch
+
+            settings.Active_recipient_link_id = settings.Recipient_links[0].Link_id;
+        }
+
+        static Recipient_key_link_entry? Find_active_recipient_link()
+        {
+            Ensure_active_recipient_selected();
+            if (settings.Active_recipient_link_id.Length == 0)
+                return null;
+
+            foreach (Recipient_key_link_entry link in settings.Recipient_links)
             {
+                if (string.Equals(link.Link_id, settings.Active_recipient_link_id, StringComparison.Ordinal))
+                    return link;
+            }
+
+            return null;
+        }
+
+        static void Synchronize_compatibility_fields_from_active_recipient()
+        {
+            Recipient_key_link_entry? active_link = Find_active_recipient_link();
+            if (active_link is null)
+            {
+                settings.Active_sender_signing_public_key = string.Empty;
+                settings.Own_sender_signing_keys = [];
+                settings.Trusted_sender_long_term_public_keys = [];
                 return;
             }
 
-            settings.Own_sender_signing_keys =
-            [
-                new Sender_signing_key_entry
-                {
-                    Public_key = legacy_public_key,
-                    Private_key_pkcs8 = legacy_private_key
-                }
-            ];
-
-            settings.Active_sender_signing_public_key = legacy_public_key;
-        }
-
-        static void Ensure_default_sender_signing_key_pair()
-        {
-            if (settings.Own_sender_signing_keys.Count > 0)
-                return;
-
-            // Для демонстрации/тестирования на первом запуске генерируется первая пара отправителя.
-            Sender_signing_key_entry generated = Generate_new_signing_key_pair_entry();
-            settings.Own_sender_signing_keys = [generated];
-            settings.Active_sender_signing_public_key = generated.Public_key;
-        }
-
-        static Sender_signing_key_entry Generate_new_signing_key_pair_entry()
-        {
-            using ECDsa signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            byte[] private_key = signer.ExportPkcs8PrivateKey();
-            byte[] public_key = signer.ExportSubjectPublicKeyInfo();
-
-            return new Sender_signing_key_entry
+            string sender_public_key = Normalize_base64_text(active_link.Sender_signing_public_key_spki);
+            if (Try_get_sender_signing_public_key_from_private(
+                    active_link.Sender_signing_private_key_pkcs8,
+                    out string sender_public_key_from_private,
+                    out _))
             {
-                Private_key_pkcs8 = Convert.ToBase64String(private_key),
-                Public_key = Convert.ToBase64String(public_key)
-            };
-        }
+                if (sender_public_key.Length == 0)
+                    sender_public_key = sender_public_key_from_private;
 
-        static string Load_public_key_from_file(string public_key_path)
-        {
-            if (!File.Exists(public_key_path))
-                return string.Empty;
-
-            try
-            {
-                return Normalize_base64_text(File.ReadAllText(public_key_path));
+                settings.Active_sender_signing_public_key = sender_public_key;
+                settings.Own_sender_signing_keys =
+                [
+                    new Sender_signing_key_entry
+                    {
+                        Public_key = sender_public_key,
+                        Private_key_pkcs8 = active_link.Sender_signing_private_key_pkcs8
+                    }
+                ];
             }
-            catch
+            else
             {
-                return string.Empty;
+                settings.Active_sender_signing_public_key = string.Empty;
+                settings.Own_sender_signing_keys = [];
             }
+
+            settings.Trusted_sender_long_term_public_keys = [Normalize_base64_text(active_link.Trusted_sender_signing_public_key)];
         }
 
         static void Save_settings_file()
         {
-            settings.Own_sender_signing_keys = Normalize_sender_signing_key_list(settings.Own_sender_signing_keys);
-            settings.Trusted_sender_long_term_public_keys = Normalize_key_list(settings.Trusted_sender_long_term_public_keys);
-            Ensure_active_sender_signing_key_selected();
-            settings.Sender_long_term_public_key = settings.Active_sender_signing_public_key;
+            settings.Recipient_links = Normalize_recipient_link_list(settings.Recipient_links);
+            Ensure_active_recipient_selected();
+            Synchronize_compatibility_fields_from_active_recipient();
 
             string json = JsonSerializer.Serialize(settings, Json_options);
             File.WriteAllText(Settings_path, json);
@@ -374,30 +474,14 @@ namespace FNS_graphics
             sender_private_key = null!;
             error_message = string.Empty;
 
-            Ensure_active_sender_signing_key_selected();
-            if (settings.Own_sender_signing_keys.Count == 0)
+            Recipient_key_link_entry? active_link = Find_active_recipient_link();
+            if (active_link is null)
             {
-                error_message = "Список собственных ключей подписи отправителя пуст.";
+                error_message = "Нет активной связи ключей получателя.";
                 return false;
             }
 
-            Sender_signing_key_entry? active_entry = null;
-            foreach (Sender_signing_key_entry item in settings.Own_sender_signing_keys)
-            {
-                if (string.Equals(item.Public_key, settings.Active_sender_signing_public_key, StringComparison.Ordinal))
-                {
-                    active_entry = item;
-                    break;
-                }
-            }
-
-            if (active_entry is null)
-            {
-                error_message = "Не выбран активный ключ подписи отправителя.";
-                return false;
-            }
-
-            if (!Try_decode_base64(active_entry.Private_key_pkcs8, out byte[] private_key_bytes))
+            if (!Try_decode_base64(active_link.Sender_signing_private_key_pkcs8, out byte[] private_key_bytes))
             {
                 error_message = "Активный приватный ключ подписи отправителя повреждён (ожидается Base64 PKCS8).";
                 return false;
@@ -424,22 +508,20 @@ namespace FNS_graphics
             }
         }
 
-        static void Ensure_active_sender_signing_key_selected()
+        static string Normalize_identifier(string? value)
         {
-            settings.Active_sender_signing_public_key = Normalize_base64_text(settings.Active_sender_signing_public_key);
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
 
-            if (settings.Active_sender_signing_public_key.Length > 0)
-            {
-                foreach (Sender_signing_key_entry key in settings.Own_sender_signing_keys)
-                {
-                    if (string.Equals(key.Public_key, settings.Active_sender_signing_public_key, StringComparison.Ordinal))
-                        return;
-                }
-            }
+            return value.Trim();
+        }
 
-            settings.Active_sender_signing_public_key = settings.Own_sender_signing_keys.Count > 0
-                ? settings.Own_sender_signing_keys[0].Public_key
-                : string.Empty;
+        static string Normalize_recipient_name(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            return value.Trim();
         }
 
         static string Normalize_base64_text(string? value)
@@ -478,52 +560,109 @@ namespace FNS_graphics
             return result;
         }
 
-        static List<Sender_signing_key_entry> Normalize_sender_signing_key_list(IEnumerable<Sender_signing_key_entry>? values)
+        static List<Recipient_key_link_entry> Normalize_recipient_link_list(IEnumerable<Recipient_key_link_entry>? values)
         {
-            List<Sender_signing_key_entry> result = [];
+            List<Recipient_key_link_entry> result = [];
             if (values is null)
                 return result;
 
-            HashSet<string> seen_public_keys = new(StringComparer.Ordinal);
-            foreach (Sender_signing_key_entry? value in values)
+            HashSet<string> seen_ids = new(StringComparer.Ordinal);
+            foreach (Recipient_key_link_entry? source in values)
             {
-                if (value is null)
+                if (source is null)
                     continue;
 
-                string public_key = Normalize_base64_text(value.Public_key);
-                string private_key = Normalize_base64_text(value.Private_key_pkcs8);
-                if (public_key.Length == 0 || private_key.Length == 0)
-                    continue;
-
-                if (!Try_decode_base64(public_key, out _))
-                    continue;
-
-                if (!Try_decode_base64(private_key, out byte[] private_key_bytes))
-                    continue;
-
-                try
+                string link_id = Normalize_identifier(source.Link_id);
+                if (link_id.Length == 0 || !seen_ids.Add(link_id))
                 {
-                    using ECDsa candidate = ECDsa.Create();
-                    candidate.ImportPkcs8PrivateKey(private_key_bytes, out int read);
-                    if (read != private_key_bytes.Length)
-                        continue;
-                }
-                catch
-                {
-                    continue;
+                    link_id = Guid.NewGuid().ToString("N");
+                    seen_ids.Add(link_id);
                 }
 
-                if (!seen_public_keys.Add(public_key))
-                    continue;
+                string recipient_name = Normalize_recipient_name(source.Recipient_name);
+                if (recipient_name.Length == 0)
+                    recipient_name = Build_random_recipient_name();
 
-                result.Add(new Sender_signing_key_entry
+                result.Add(new Recipient_key_link_entry
                 {
-                    Public_key = public_key,
-                    Private_key_pkcs8 = private_key
+                    Link_id = link_id,
+                    Recipient_name = recipient_name,
+                    Sender_signing_private_key_pkcs8 = Normalize_base64_text(source.Sender_signing_private_key_pkcs8),
+                    Sender_signing_public_key_spki = Normalize_base64_text(source.Sender_signing_public_key_spki),
+                    Trusted_sender_signing_public_key = Normalize_base64_text(source.Trusted_sender_signing_public_key),
+                    Receiver_hybrid_public_key = Normalize_base64_text(source.Receiver_hybrid_public_key)
                 });
             }
 
             return result;
+        }
+
+        static string Ensure_unique_recipient_name(string candidate, HashSet<string> existing_names)
+        {
+            if (existing_names.Add(candidate))
+                return candidate;
+
+            while (true)
+            {
+                string generated = Build_random_recipient_name();
+                if (existing_names.Add(generated))
+                    return generated;
+            }
+        }
+
+        static string Build_random_recipient_name()
+        {
+            Span<char> digits = stackalloc char[6];
+            for (int i = 0; i < digits.Length; i++)
+                digits[i] = (char)('0' + RandomNumberGenerator.GetInt32(0, 10));
+
+            return $"Получатель_{new string(digits)}";
+        }
+
+        static Sender_signing_key_entry Generate_new_signing_key_pair_entry()
+        {
+            using ECDsa signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            return new Sender_signing_key_entry
+            {
+                Private_key_pkcs8 = Convert.ToBase64String(signer.ExportPkcs8PrivateKey()),
+                Public_key = Convert.ToBase64String(signer.ExportSubjectPublicKeyInfo())
+            };
+        }
+
+        static bool Try_validate_ecdsa_public_key(string key_base64)
+        {
+            string normalized = Normalize_base64_text(key_base64);
+            if (!Try_decode_base64(normalized, out byte[] key_bytes))
+                return false;
+
+            try
+            {
+                using ECDsa ecdsa = ECDsa.Create();
+                ecdsa.ImportSubjectPublicKeyInfo(key_bytes, out int read);
+                return read == key_bytes.Length;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        static bool Try_validate_ecdh_public_key(string key_base64)
+        {
+            string normalized = Normalize_base64_text(key_base64);
+            if (!Try_decode_base64(normalized, out byte[] key_bytes))
+                return false;
+
+            try
+            {
+                using ECDiffieHellman ecdh = ECDiffieHellman.Create();
+                ecdh.ImportSubjectPublicKeyInfo(key_bytes, out int read);
+                return read == key_bytes.Length;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         static bool Try_decode_base64(string encoded, out byte[] bytes)
@@ -553,12 +692,21 @@ namespace FNS_graphics
             return new Digital_signature_settings
             {
                 Sign_ciphertext = source.Sign_ciphertext,
-                Sender_long_term_public_key = source.Sender_long_term_public_key,
-                Active_sender_signing_public_key = source.Active_sender_signing_public_key,
-                Own_sender_signing_keys = [.. source.Own_sender_signing_keys.ConvertAll(static value => new Sender_signing_key_entry
+                Recipient_links = [.. source.Recipient_links.ConvertAll(static link => new Recipient_key_link_entry
                 {
-                    Public_key = value.Public_key,
-                    Private_key_pkcs8 = value.Private_key_pkcs8
+                    Link_id = link.Link_id,
+                    Recipient_name = link.Recipient_name,
+                    Sender_signing_private_key_pkcs8 = link.Sender_signing_private_key_pkcs8,
+                    Sender_signing_public_key_spki = link.Sender_signing_public_key_spki,
+                    Trusted_sender_signing_public_key = link.Trusted_sender_signing_public_key,
+                    Receiver_hybrid_public_key = link.Receiver_hybrid_public_key
+                })],
+                Active_recipient_link_id = source.Active_recipient_link_id,
+                Active_sender_signing_public_key = source.Active_sender_signing_public_key,
+                Own_sender_signing_keys = [.. source.Own_sender_signing_keys.ConvertAll(static key => new Sender_signing_key_entry
+                {
+                    Public_key = key.Public_key,
+                    Private_key_pkcs8 = key.Private_key_pkcs8
                 })],
                 Trusted_sender_long_term_public_keys = [.. source.Trusted_sender_long_term_public_keys]
             };
@@ -569,6 +717,5 @@ namespace FNS_graphics
             if (!Directory.Exists(Storage_directory_path))
                 Directory.CreateDirectory(Storage_directory_path);
         }
-
     }
 }

@@ -1,11 +1,11 @@
-﻿<Window x:Class="FNS_graphics.DigitalSignatureSettingsWindow"
+<Window x:Class="FNS_graphics.DigitalSignatureSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Настройки цифровой подписи"
-        Height="680"
-        Width="980"
-        MinWidth="660"
-        MinHeight="460"
+        Title="Настройки цифровой подписи и связывание ключей"
+        Height="700"
+        Width="1020"
+        MinWidth="760"
+        MinHeight="500"
         Loaded="Window_Loaded"
         Closed="Window_Closed">
     <Window.Resources>
@@ -43,6 +43,7 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Background" Value="#FFFFFFFF" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="MinWidth" Value="0" />
             <Setter Property="Height" Value="34" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="AcceptsReturn" Value="False" />
@@ -65,6 +66,12 @@
             <Setter Property="BorderThickness" Value="1" />
         </Style>
 
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#FFD5E3D6" />
+            <Setter Property="BorderBrush" Value="#FF8EA691" />
+            <Setter Property="Foreground" Value="#FF2B4631" />
+        </Style>
+
         <Style x:Key="DeleteButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Background" Value="#FFC63870" />
             <Setter Property="BorderBrush" Value="#FF9A2A56" />
@@ -75,11 +82,11 @@
             <Setter Property="BorderBrush" Value="#FFB6CCB8" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Background" Value="#FFFFFFFF" />
-            <Setter Property="Padding" Value="3" />
+            <Setter Property="Padding" Value="4" />
         </Style>
 
         <Style TargetType="ListBoxItem">
-            <Setter Property="Margin" Value="0,3,0,3" />
+            <Setter Property="Margin" Value="0,4,0,4" />
             <Setter Property="Padding" Value="0" />
         </Style>
     </Window.Resources>
@@ -88,130 +95,203 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
                 <Border Style="{StaticResource CardStyle}">
+                    <Grid Margin="0,4,0,2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,10">
+                                Настройка ключей цифровой подписи для ролей отправителя и получателя.
+                            </TextBlock>
+
+                            <TextBlock FontSize="13"
+                                       Foreground="#FF4A5C50"
+                                       Margin="0,2,0,0">
+                                1) Данными ключами можно обменяться только по защищённым каналам связи
+                                <LineBreak />
+                                2) Списки собственных и доверенных ключей не синхронизируются между отправителем и получателем автоматически и заполняются вручную
+                            </TextBlock>
+                        </StackPanel>
+
+                        <Border Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Background="#FFDCEEDC"
+                                BorderBrush="#FF6AA56A"
+                                BorderThickness="1.5"
+                                CornerRadius="7"
+                                Padding="12,8"
+                                Margin="14,0,0,0">
+                            <CheckBox x:Name="SignCiphertextCheckBox"
+                                      Content="Подписывать шифротекст"
+                                      IsChecked="True"
+                                      FontSize="16"
+                                      FontWeight="SemiBold"
+                                      Foreground="#FF1F3A2A"
+                                      VerticalAlignment="Center"
+                                      HorizontalAlignment="Left"
+                                      VerticalContentAlignment="Center"
+                                      HorizontalContentAlignment="Left"
+                                      Margin="0,1,0,0" />
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
-                        <Grid Margin="0,4,0,10">
+                        <TextBlock Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8">Ваш публичный ключ получателя (ECDH)</TextBlock>
+
+                        <TextBlock Margin="0,0,0,8">
+                            Этот ключ нужно передать собеседнику, чтобы он шифровал сообщения для вас (может быть отправлен по не защищённому каналу).
+                        </TextBlock>
+                        <TextBox x:Name="OwnReceiverPublicKeyTextBox"
+                                 IsReadOnly="True"
+                                 Margin="0,0,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8">Генератор ключей</TextBlock>
+
+                        <TextBlock Margin="0,0,0,8">
+                            Сгенерированный ключ можно скопировать и вручную вставить в поле нужной связи.
+                        </TextBlock>
+                        <TextBox x:Name="GeneratedKeyTextBox" Margin="0,0,0,8" />
+
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Margin="0,0,0,0">
+                            <Button Content="Сгенерировать ключ ECDSA"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Click="GenerateSenderSigningPublicKeyButton_Click"
+                                    Margin="0,0,8,0" />
+                            <Button Content="Сгенерировать ключ ECDH"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Click="GenerateReceiverHybridPublicKeyButton_Click"
+                                    Margin="0" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <Grid Margin="0,4,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Style="{StaticResource SectionTitleStyle}" Margin="0">
-                                Настройка ключей цифровой подписи для ролей отправителя и получателя.
-                            </TextBlock>
-                            <CheckBox x:Name="SignCiphertextCheckBox"
-                                      Grid.Column="1"
-                                      Content="Подписывать шифротекст"
-                                      IsChecked="True"
-                                      VerticalAlignment="Center"
-                                      HorizontalAlignment="Right"
-                                      Margin="12,0,0,0" />
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Style="{StaticResource SectionTitleStyle}"
+                                           Margin="0,0,0,10">
+                                    Список связанных ключей
+                                </TextBlock>
+
+                                <TextBlock FontSize="13"
+                                           Foreground="#FF4A5C50"
+                                           Margin="0,2,0,0">
+                                    1) Эти тройки ключей относятся к одной вашей связи с человеком
+                                    <LineBreak />
+                                    2) Для каждого нового получателя создаётся новая связь
+                                    <LineBreak />
+                                    3) Ключи можно менять, но не на произвольные, а на сгенерированные из Генератора ключей выше
+                                </TextBlock>
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
+                                    Content="Создать связь"
+                                    Click="CreateRecipientLinkButton_Click"
+                                    Margin="10,0,0,0"
+                                    VerticalAlignment="Center" />
                         </Grid>
 
-                        <TextBlock FontSize="13"
-                                   Foreground="#FF4A5C50"
-                                   Margin="0,2,0,0">
-                            1) Данными ключами можно обменяться только по защищённым каналам связи
-                            <LineBreak />
-                            2) Списки собственных и доверенных ключей не синхронизируются между отправителем и получателем автоматически и заполняются вручную
-                        </TextBlock>
-                    </StackPanel>
-                </Border>
+                        <TextBlock x:Name="ActiveRecipientInfoTextBlock"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FF2E6F43"
+                                   Margin="0,0,0,8" />
 
-                <Border Style="{StaticResource CardStyle}">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8">Мои долгосрочные ключи подписи (роль: отправитель)</TextBlock>
-
-                        <TextBlock Margin="0,0,0,2" VerticalAlignment="Bottom">Введите новый или сгенерируйте свой публичный ключ подписи</TextBlock>
-                        <TextBox x:Name="OwnSenderPublicKeyTextBox" Margin="0,0,0,8" />
-
-                        <StackPanel Orientation="Horizontal"
-                                    HorizontalAlignment="Right"
-                                    Margin="0,0,0,10">
-                            <Button Content="Сгенерировать ключ"
-                                    Click="GenerateSenderLongTermKeyButton_Click"
-                                    Margin="0,0,10,0" />
-                            <Button Content="Добавить в мои ключи"
-                                    Click="AddOwnSenderKeyButton_Click"
-                                    Margin="0" />
-                        </StackPanel>
-
-                        <TextBlock Margin="0,0,0,2" VerticalAlignment="Bottom">Список моих публичных ключей подписи отправителя</TextBlock>
-                        <ListBox x:Name="OwnSenderSigningKeysListBox"
-                                 Margin="0,0,0,12"
+                        <ListBox x:Name="RecipientLinksListBox"
                                  HorizontalContentAlignment="Stretch">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Margin="0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox Grid.Column="0"
-                                                 Text="{Binding Public_key, Mode=OneWay}"
-                                                 IsReadOnly="True"
-                                                 Margin="0,0,8,0" />
-                                        <StackPanel Grid.Column="1"
-                                                    Orientation="Horizontal"
-                                                    VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Active_label, Mode=OneWay}"
-                                                       Foreground="#FF2E6F43"
-                                                       FontWeight="SemiBold"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,8,0" />
-                                            <Button Content="Сделать активным"
-                                                    Tag="{Binding Public_key}"
-                                                    IsEnabled="{Binding Can_select, Mode=OneWay}"
-                                                    Click="SelectOwnSenderKeyButton_Click"
-                                                    Margin="0,0,8,0" />
-                                            <Button Content="Удалить"
-                                                    Style="{StaticResource DeleteButtonStyle}"
-                                                    Tag="{Binding Public_key}"
-                                                    Click="RemoveOwnSenderKeyButton_Click"
-                                                    Margin="0" />
-                                        </StackPanel>
-                                    </Grid>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                    </StackPanel>
-                </Border>
+                                    <Border BorderBrush="#FFD4E5D7"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Background="#FFE8F0E8"
+                                            Padding="8"
+                                            HorizontalAlignment="Stretch"
+                                            MaxWidth="{Binding RelativeSource={RelativeSource AncestorType=ListBox}, Path=ActualWidth}"
+                                            ClipToBounds="True"
+                                            Margin="0,0,0,2">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
 
-                <Border Style="{StaticResource CardStyle}">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8">Доверенные ключи подписи (роль: получатель)</TextBlock>
+                                            <Grid Grid.Row="0" Margin="0,0,0,8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Active_label, Mode=OneWay}"
+                                                           Foreground="#FF2E6F43"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Margin="0" />
+                                                <Button Grid.Column="1"
+                                                        Content="Сделать активным"
+                                                        Style="{StaticResource SecondaryButtonStyle}"
+                                                        Tag="{Binding Runtime_key}"
+                                                        IsEnabled="{Binding Can_select, Mode=OneWay}"
+                                                        Click="SelectRecipientLinkButton_Click"
+                                                        Margin="0,0,8,0" />
+                                                <Button Grid.Column="2"
+                                                        Content="Перегенерировать"
+                                                        Style="{StaticResource SecondaryButtonStyle}"
+                                                        Tag="{Binding Runtime_key}"
+                                                        Click="RegenerateRecipientLinkButton_Click"
+                                                        Margin="0,0,8,0" />
+                                                <Button Grid.Column="3"
+                                                        Content="Удалить"
+                                                        Style="{StaticResource DeleteButtonStyle}"
+                                                        Tag="{Binding Runtime_key}"
+                                                        Click="RemoveRecipientLinkButton_Click"
+                                                        Margin="0" />
+                                            </Grid>
 
-                        <TextBlock Margin="0,0,0,2" VerticalAlignment="Bottom">Введите публичный ключ отправителя, которому доверяете</TextBlock>
-                        <TextBox x:Name="TrustedSenderPublicKeyTextBox" Margin="0,0,0,8" />
+                                            <ScrollViewer Grid.Row="1"
+                                                          HorizontalScrollBarVisibility="Auto"
+                                                          VerticalScrollBarVisibility="Disabled"
+                                                          CanContentScroll="False">
+                                                <StackPanel>
+                                                    <TextBlock Margin="0,0,0,2">Имя получателя</TextBlock>
+                                                    <TextBox Text="{Binding Recipient_name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                             Margin="0,0,0,10" />
 
-                        <StackPanel Orientation="Horizontal"
-                                    HorizontalAlignment="Right"
-                                    Margin="0,0,0,10">
-                            <Button Content="Добавить в доверенные"
-                                    Click="AddTrustedSenderKeyButton_Click"
-                                    Margin="0" />
-                        </StackPanel>
+                                                    <TextBlock Margin="0,0,0,2">Публичный ключ подписи отправителя (ECDSA)</TextBlock>
+                                                    <TextBox Text="{Binding Sender_signing_public_key_spki, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                             IsEnabled="{Binding IsChecked, ElementName=SignCiphertextCheckBox}"
+                                                             Margin="0,0,0,10" />
 
-                        <TextBlock Margin="0,0,0,2" VerticalAlignment="Bottom">Список доверенных публичных ключей отправителей</TextBlock>
-                        <ListBox x:Name="TrustedSenderKeysListBox"
-                                 Margin="0,0,0,10"
-                                 HorizontalContentAlignment="Stretch">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid Margin="0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                         <TextBox Grid.Column="0"
-                                                 Text="{Binding ., Mode=OneWay}"
-                                                 IsReadOnly="True"
-                                                 Margin="0,0,8,0" />
-                                        <Button Grid.Column="1"
-                                                Content="Удалить"
-                                                Style="{StaticResource DeleteButtonStyle}"
-                                                Tag="{Binding}"
-                                                Click="RemoveTrustedSenderKeyButton_Click"
-                                                Margin="0" />
-                                    </Grid>
+                                                    <TextBlock Margin="0,0,0,2">Публичный ключ подписи получателя (ECDSA)</TextBlock>
+                                                    <TextBox Text="{Binding Trusted_sender_signing_public_key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                             IsEnabled="{Binding IsChecked, ElementName=SignCiphertextCheckBox}"
+                                                             Margin="0,0,0,10" />
+
+                                                    <TextBlock Margin="0,0,0,2">Публичный ключ получателя (ECDH)</TextBlock>
+                                                    <TextBox Text="{Binding Receiver_hybrid_public_key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                             Margin="0,0,0,0" />
+                                                </StackPanel>
+                                            </ScrollViewer>
+                                        </Grid>
+                                    </Border>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>

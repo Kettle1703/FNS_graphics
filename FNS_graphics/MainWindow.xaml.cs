@@ -48,6 +48,7 @@ namespace FNS_graphics
         private bool _warmUpCompleted;
         private bool _warmUpInProgress;
         private const string AutoPlaceholder = "<заполняется автоматически>";
+        private const string LinksRequiredStatusMessage = "Для шифрования или дешифрования необходимо настроить связи ключей.";
 
         public MainWindow()
         {
@@ -175,6 +176,9 @@ namespace FNS_graphics
             if (!EnsureHybridReady())
                 return;
 
+            if (!EnsureRecipientLinksConfigured())
+                return;
+
             if (!Window_input_validation.TryBuildEncryptRequest(
                     SourceTextBox.Text,
                     SharedReceiverPublicKeyTextBox.Text,
@@ -262,6 +266,9 @@ namespace FNS_graphics
             // Выполняет дешифрование и записывает исходный текст.
             ClearPersistentHighlights();
             if (!EnsureHybridReady())
+                return;
+
+            if (!EnsureRecipientLinksConfigured())
                 return;
 
             if (!Window_input_validation.TryBuildDecryptPacket(
@@ -411,6 +418,16 @@ namespace FNS_graphics
                 StatusTextBlock.Text = $"Ошибка инициализации шифровального модуля: {ex.Message}";
                 return false;
             }
+        }
+
+        private bool EnsureRecipientLinksConfigured()
+        {
+            // Проверяет наличие хотя бы одной связи ключей получателя.
+            if (Digital_signature_store.Has_configured_recipient_links())
+                return true;
+
+            StatusTextBlock.Text = LinksRequiredStatusMessage;
+            return false;
         }
 
         private void SetCryptographyActionsEnabled(bool isEnabled)
