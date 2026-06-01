@@ -180,8 +180,8 @@ namespace FNS_rebuild
                 return new Hybrid_cipher_package
                 {
                     Ciphertext = fss_ciphertext,
-                    Encrypted_symmetric_key = Convert.ToBase64String(encrypted_symmetric_key),
-                    Ephemeral_public_key = Convert.ToBase64String(ephemeral_public_key_spki),
+                    Encrypted_symmetric_key = Base64_url_codec.Encode(encrypted_symmetric_key),
+                    Ephemeral_public_key = Base64_url_codec.Encode(ephemeral_public_key_spki),
                     Block_plain_text_length = options.Block_plain_text_length,
                     Curve_id = Curve_id_nist_p256
                 };
@@ -203,8 +203,11 @@ namespace FNS_rebuild
             if (packet.Curve_id != Curve_id_nist_p256)
                 throw new CryptographicException($"Неподдерживаемый идентификатор кривой: {packet.Curve_id}.");
 
-            byte[] ephemeral_public_key_spki = Convert.FromBase64String(packet.Ephemeral_public_key);
-            byte[] encrypted_symmetric_key = Convert.FromBase64String(packet.Encrypted_symmetric_key);
+            if (!Base64_url_codec.Try_decode(packet.Ephemeral_public_key, out byte[] ephemeral_public_key_spki))
+                throw new CryptographicException("Поле Ephemeral_public_key не является корректным Base64/Base64URL.");
+
+            if (!Base64_url_codec.Try_decode(packet.Encrypted_symmetric_key, out byte[] encrypted_symmetric_key))
+                throw new CryptographicException("Поле Encrypted_symmetric_key не является корректным Base64/Base64URL.");
 
             using ECDiffieHellman sender_ephemeral_public_holder = ECDiffieHellman.Create();
             sender_ephemeral_public_holder.ImportSubjectPublicKeyInfo(ephemeral_public_key_spki, out int read);
@@ -344,7 +347,7 @@ namespace FNS_rebuild
 
         static string Derive_fss_subkey_stream(byte[] seed, int symbols_count, string alphabet)
         {
-            // Генерация строкового ключевого потока для текущей реализации Coefficient_diffusion.
+            // Генерация строкового ключевого потока для текущего раундового слоя коэффициентов.
             // Поток детерминирован от seed и выбранного алфавита.
             if (symbols_count <= 0)
                 return "";

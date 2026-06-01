@@ -854,10 +854,10 @@ namespace FNS_graphics
             }
 
             string ciphertext = payload.Ciphertext?.Trim() ?? string.Empty;
-            string ephemeral_public_key = payload.Ephemeral_public_key?.Trim() ?? string.Empty;
-            string signature = payload.Ephemeral_public_key_signature?.Trim() ?? string.Empty;
+            string ephemeral_public_key = Base64_url_codec.Canonicalize_if_possible(payload.Ephemeral_public_key);
+            string signature = Base64_url_codec.Canonicalize_if_possible(payload.Ephemeral_public_key_signature);
             string sender_fingerprint = payload.Sender_signing_key_fingerprint?.Trim() ?? string.Empty;
-            string encrypted_symmetric_key = payload.Encrypted_symmetric_key?.Trim() ?? string.Empty;
+            string encrypted_symmetric_key = Base64_url_codec.Canonicalize_if_possible(payload.Encrypted_symmetric_key);
 
             if (ciphertext.Length == 0)
             {
@@ -867,19 +867,19 @@ namespace FNS_graphics
 
             if (!Try_decode_base64(ephemeral_public_key, out _))
             {
-                error_message = "В JSON-пакете поле Ephemeral_public_key должно быть корректным Base64.";
+                error_message = "В JSON-пакете поле Ephemeral_public_key должно быть корректным Base64/Base64URL.";
                 return false;
             }
 
             if (!Try_decode_base64(encrypted_symmetric_key, out _))
             {
-                error_message = "В JSON-пакете поле Encrypted_symmetric_key должно быть корректным Base64.";
+                error_message = "В JSON-пакете поле Encrypted_symmetric_key должно быть корректным Base64/Base64URL.";
                 return false;
             }
 
             if (signature.Length > 0 && !Try_decode_base64(signature, out _))
             {
-                error_message = "В JSON-пакете поле Ephemeral_public_key_signature должно быть корректным Base64.";
+                error_message = "В JSON-пакете поле Ephemeral_public_key_signature должно быть корректным Base64/Base64URL.";
                 return false;
             }
 
@@ -950,20 +950,7 @@ namespace FNS_graphics
 
         private static bool Try_decode_base64(string encoded, out byte[] bytes)
         {
-            bytes = [];
-            if (string.IsNullOrWhiteSpace(encoded))
-                return false;
-
-            string normalized = encoded.Trim();
-            int buffer_length = ((normalized.Length + 3) / 4) * 3;
-            byte[] buffer = new byte[buffer_length];
-
-            if (!Convert.TryFromBase64String(normalized, buffer, out int written))
-                return false;
-
-            bytes = new byte[written];
-            Array.Copy(buffer, bytes, written);
-            return true;
+            return Base64_url_codec.Try_decode(encoded, out bytes);
         }
 
         private static bool Is_valid_key_fingerprint(string value)

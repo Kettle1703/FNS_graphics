@@ -46,7 +46,7 @@ namespace FNS_graphics
             else if (!TryDecodeBase64(receiver_public_text, out receiver_public_spki))
             {
                 request = null!;
-                error_message = "Публичный ключ получателя должен быть в формате Base64.";
+                error_message = "Публичный ключ получателя должен быть в формате Base64/Base64URL.";
                 return false;
             }
 
@@ -73,9 +73,9 @@ namespace FNS_graphics
         {
             // Проверяет и собирает пакет для дешифрования.
             string ciphertext = ciphertext_text ?? string.Empty;
-            string sender_public_key = sender_public_key_text?.Trim() ?? string.Empty;
-            string encrypted_symmetric_key = encrypted_symmetric_key_text?.Trim() ?? string.Empty;
-            string sender_public_key_signature = sender_public_key_signature_text?.Trim() ?? string.Empty;
+            string sender_public_key = Base64_url_codec.Canonicalize_if_possible(sender_public_key_text);
+            string encrypted_symmetric_key = Base64_url_codec.Canonicalize_if_possible(encrypted_symmetric_key_text);
+            string sender_public_key_signature = Base64_url_codec.Canonicalize_if_possible(sender_public_key_signature_text);
 
             if (string.IsNullOrWhiteSpace(ciphertext) || ciphertext.StartsWith("<", StringComparison.Ordinal))
             {
@@ -102,14 +102,14 @@ namespace FNS_graphics
             if (!IsValidBase64(sender_public_key) || !IsValidBase64(encrypted_symmetric_key))
             {
                 packet = null!;
-                error_message = "Поля ключей пакета должны быть в формате Base64.";
+                error_message = "Поля ключей пакета должны быть в формате Base64/Base64URL.";
                 return false;
             }
 
             if (sender_public_key_signature.Length > 0 && sender_public_key_signature != auto_placeholder && !IsValidBase64(sender_public_key_signature))
             {
                 packet = null!;
-                error_message = "Подпись пакета отправителя должна быть в формате Base64.";
+                error_message = "Подпись пакета отправителя должна быть в формате Base64/Base64URL.";
                 return false;
             }
 
@@ -137,25 +137,8 @@ namespace FNS_graphics
 
         static bool TryDecodeBase64(string encoded, out byte[] bytes)
         {
-            // Преобразует Base64-строку без исключений.
-            int buffer_length = ((encoded.Length + 3) / 4) * 3;
-            byte[] buffer = new byte[buffer_length];
-
-            if (!Convert.TryFromBase64String(encoded, buffer, out int written))
-            {
-                bytes = [];
-                return false;
-            }
-
-            if (written == buffer_length)
-            {
-                bytes = buffer;
-                return true;
-            }
-
-            bytes = new byte[written];
-            Array.Copy(buffer, bytes, written);
-            return true;
+            // Преобразует Base64/Base64URL-строку без исключений.
+            return Base64_url_codec.Try_decode(encoded, out bytes);
         }
     }
 }

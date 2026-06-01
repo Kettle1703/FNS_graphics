@@ -78,7 +78,7 @@ namespace FNS_rebuild
             Factorial_decoding.number_to_char.Clear();
             byte_to_char.Clear();
             char_to_byte.Clear();
-            Coefficient_diffusion.Clear_key_cache();
+            Round_coefficient_cipher.Clear_key_cache();
 
             Digit counter = 0;
             foreach (char symbol in alphabet)
@@ -121,7 +121,13 @@ namespace FNS_rebuild
             if (options.Use_blocks())
                 return Encrypt_by_blocks(input, options);
 
-            return Encrypt_single_block(input, options);
+            byte[] message_nonce = Round_coefficient_cipher.Create_message_nonce();
+            string block_encrypted = Encrypt_single_block(input, options, message_nonce, block_index: 0);
+
+            StringBuilder output = new();
+            Write_bytes_as_chars(output, message_nonce);
+            output.Append(block_encrypted);
+            return output.ToString();
         }
 
         public string Decrypt(string input, Cipher_options options)
@@ -132,10 +138,13 @@ namespace FNS_rebuild
             if (options.Use_blocks())
                 return Decrypt_by_blocks(input, options);
 
-            return Decrypt_single_block(input, options);
+            int index = 0;
+            byte[] message_nonce = Read_bytes_from_chars(input, ref index, Round_coefficient_cipher.Message_nonce_bytes);
+            string block_encrypted = input.Substring(index);
+            return Decrypt_single_block(block_encrypted, options, message_nonce, block_index: 0);
         }
 
-        string Encrypt_single_block(string input, Cipher_options options)
+        string Encrypt_single_block(string input, Cipher_options options, byte[] message_nonce, int block_index)
         {
             // Шифрует один блок открытого текста в текущем формате ФСС.
 
@@ -144,14 +153,14 @@ namespace FNS_rebuild
             Digit[] factorial_coefficients = Factorial_encoding.Convert_to_factorial_system(normalized_source_digits);
             factorial_coefficients = Pad_factorial_coefficients(factorial_coefficients, source_digits.Length);
             string serialized_coefficients = Serialize_factorial(factorial_coefficients, source_digits.Length);
-            return Coefficient_diffusion.Encrypt(serialized_coefficients, options);
+            return Round_coefficient_cipher.Encrypt_block(serialized_coefficients, options, message_nonce, block_index);
         }
 
-        string Decrypt_single_block(string input, Cipher_options options)
+        string Decrypt_single_block(string input, Cipher_options options, byte[] message_nonce, int block_index)
         {
             // Дешифрует один блок шифротекста из текущего формата ФСС.
 
-            string serialized_coefficients = Coefficient_diffusion.Decrypt(input, options);
+            string serialized_coefficients = Round_coefficient_cipher.Decrypt_block(input, options, message_nonce, block_index);
             Digit[] factorial_coefficients = Deserialize_factorial(serialized_coefficients, out int source_text_length);
             Digit[] source_digits = Factorial_decoding.Convert_from_factorial_system(factorial_coefficients);
             source_digits = Restore_length(source_digits, source_text_length);
@@ -167,11 +176,14 @@ namespace FNS_rebuild
             int source_text_length = input.Length;
             int block_plain_text_length = options.Block_plain_text_length;
             StringBuilder output = new();
+            byte[] message_nonce = Round_coefficient_cipher.Create_message_nonce();
 
             Write_u16(output, source_text_length);
             Write_u16(output, block_plain_text_length);
+            Write_bytes_as_chars(output, message_nonce);
 
             int offset = 0;
+            int block_index = 0;
             while (offset < source_text_length)
             {
                 int current_block_length = block_plain_text_length;
@@ -180,10 +192,11 @@ namespace FNS_rebuild
                     current_block_length = remaining;
 
                 string block_source = input.Substring(offset, current_block_length);
-                string block_encrypted = Encrypt_single_block(block_source, options);
+                string block_encrypted = Encrypt_single_block(block_source, options, message_nonce, block_index);
                 output.Append(block_encrypted);
 
                 offset += current_block_length;
+                block_index++;
             }
 
             return output.ToString();
@@ -197,9 +210,11 @@ namespace FNS_rebuild
             int index = 0;
             int source_text_length = Read_u16(input, ref index);
             int block_plain_text_length = Read_u16(input, ref index);
+            byte[] message_nonce = Read_bytes_from_chars(input, ref index, Round_coefficient_cipher.Message_nonce_bytes);
             StringBuilder output = new(source_text_length);
 
             int restored_length = 0;
+            int block_index = 0;
             while (restored_length < source_text_length)
             {
                 int current_block_length = block_plain_text_length;
@@ -209,11 +224,12 @@ namespace FNS_rebuild
 
                 int encrypted_block_length = Get_ciphertext_length_for_source_length(current_block_length);
                 string block_encrypted = input.Substring(index, encrypted_block_length);
-                string block_source = Decrypt_single_block(block_encrypted, options);
+                string block_source = Decrypt_single_block(block_encrypted, options, message_nonce, block_index);
                 output.Append(block_source);
 
                 index += encrypted_block_length;
                 restored_length += current_block_length;
+                block_index++;
             }
 
             return output.ToString();
@@ -355,6 +371,32 @@ namespace FNS_rebuild
             byte high = char_to_byte[input[index + 1]];
             index += 2;
             return low + (high << 8);
+        }
+
+        static void Write_bytes_as_chars(StringBuilder output, byte[] bytes)
+        {
+            // Служебная запись байтов в символы алфавита 1:1.
+            for (int i = 0; i < bytes.Length; i++)
+                output.Append(byte_to_char[bytes[i]]);
+        }
+
+        static byte[] Read_bytes_from_chars(string input, ref int index, int count)
+        {
+            // Служебное чтение фиксированного количества байтов из символов алфавита.
+            if (count < 0)
+                throw new InvalidOperationException("Количество считываемых байтов не может быть отрицательным.");
+
+            if (input.Length - index < count)
+                throw new InvalidOperationException("Шифротекст обрезан: не хватает служебного nonce.");
+
+            byte[] result = new byte[count];
+            for (int i = 0; i < count; i++)
+            {
+                result[i] = char_to_byte[input[index]];
+                index++;
+            }
+
+            return result;
         }
 
         static int Get_ciphertext_length_for_source_length(int source_text_length)

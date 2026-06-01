@@ -4,6 +4,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
+using FNS_rebuild;
 
 namespace FNS_graphics
 {
@@ -200,7 +201,7 @@ namespace FNS_graphics
                     Receiver_private_key_path,
                     Receiver_public_key_path);
 
-                OwnReceiverPublicKeyTextBox.Text = Convert.ToBase64String(receiver_private.ExportSubjectPublicKeyInfo());
+                OwnReceiverPublicKeyTextBox.Text = Base64_url_codec.Encode(receiver_private.ExportSubjectPublicKeyInfo());
             }
             catch
             {
@@ -265,19 +266,7 @@ namespace FNS_graphics
 
         static string Normalize_base64_text(string? value)
         {
-            if (string.IsNullOrWhiteSpace(value))
-                return string.Empty;
-
-            string source = value.Trim();
-            char[] buffer = new char[source.Length];
-            int written = 0;
-            foreach (char ch in source)
-            {
-                if (!char.IsWhiteSpace(ch))
-                    buffer[written++] = ch;
-            }
-
-            return written == 0 ? string.Empty : new string(buffer, 0, written);
+            return Base64_url_codec.Canonicalize_if_possible(value);
         }
 
         sealed class Recipient_link_view_item

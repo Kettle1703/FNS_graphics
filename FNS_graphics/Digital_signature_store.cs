@@ -149,13 +149,13 @@ namespace FNS_graphics
         internal static string Generate_sender_signing_public_key_spki_base64()
         {
             using ECDsa signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            return Convert.ToBase64String(signer.ExportSubjectPublicKeyInfo());
+            return Base64_url_codec.Encode(signer.ExportSubjectPublicKeyInfo());
         }
 
         internal static string Generate_receiver_hybrid_public_key_spki_base64()
         {
             using ECDiffieHellman receiver = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            return Convert.ToBase64String(receiver.ExportSubjectPublicKeyInfo());
+            return Base64_url_codec.Encode(receiver.ExportSubjectPublicKeyInfo());
         }
 
         internal static bool Try_get_sender_signing_public_key_from_private(
@@ -189,7 +189,7 @@ namespace FNS_graphics
                     return false;
                 }
 
-                sender_signing_public_key_spki = Convert.ToBase64String(signer.ExportSubjectPublicKeyInfo());
+                sender_signing_public_key_spki = Base64_url_codec.Encode(signer.ExportSubjectPublicKeyInfo());
                 return true;
             }
             catch
@@ -271,7 +271,7 @@ namespace FNS_graphics
                 using (sender_private_key)
                 {
                     byte[] signature = sender_private_key.SignData(payload, HashAlgorithmName.SHA256);
-                    signature_base64 = Convert.ToBase64String(signature);
+                    signature_base64 = Base64_url_codec.Encode(signature);
                     return true;
                 }
             }
@@ -726,18 +726,7 @@ namespace FNS_graphics
 
         static string Normalize_base64_text(string? value)
         {
-            if (string.IsNullOrWhiteSpace(value))
-                return string.Empty;
-
-            string source = value.Trim();
-            StringBuilder builder = new(source.Length);
-            foreach (char ch in source)
-            {
-                if (!char.IsWhiteSpace(ch))
-                    builder.Append(ch);
-            }
-
-            return builder.ToString();
+            return Base64_url_codec.Canonicalize_if_possible(value);
         }
 
         static string Normalize_key_fingerprint(string? value)
@@ -857,8 +846,8 @@ namespace FNS_graphics
             using ECDsa signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
             return new Sender_signing_key_entry
             {
-                Private_key_pkcs8 = Convert.ToBase64String(signer.ExportPkcs8PrivateKey()),
-                Public_key = Convert.ToBase64String(signer.ExportSubjectPublicKeyInfo())
+                Private_key_pkcs8 = Base64_url_codec.Encode(signer.ExportPkcs8PrivateKey()),
+                Public_key = Base64_url_codec.Encode(signer.ExportSubjectPublicKeyInfo())
             };
         }
 
@@ -911,7 +900,7 @@ namespace FNS_graphics
                     receiver_private_key_path,
                     receiver_public_key_path);
 
-                receiver_public_key_spki_base64 = Convert.ToBase64String(receiver_private_key.ExportSubjectPublicKeyInfo());
+                receiver_public_key_spki_base64 = Base64_url_codec.Encode(receiver_private_key.ExportSubjectPublicKeyInfo());
                 return true;
             }
             catch
@@ -922,24 +911,7 @@ namespace FNS_graphics
 
         static bool Try_decode_base64(string encoded, out byte[] bytes)
         {
-            int buffer_length = ((encoded.Length + 3) / 4) * 3;
-            byte[] buffer = new byte[buffer_length];
-
-            if (!Convert.TryFromBase64String(encoded, buffer, out int written))
-            {
-                bytes = [];
-                return false;
-            }
-
-            if (written == buffer_length)
-            {
-                bytes = buffer;
-                return true;
-            }
-
-            bytes = new byte[written];
-            Array.Copy(buffer, bytes, written);
-            return true;
+            return Base64_url_codec.Try_decode(encoded, out bytes);
         }
 
         static Digital_signature_settings Clone(Digital_signature_settings source)
