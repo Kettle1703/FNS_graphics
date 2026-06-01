@@ -30,6 +30,10 @@ namespace FNS_rebuild
         // (Ciphertext + Encrypted_symmetric_key + Ephemeral_public_key + служебные параметры).
         // Формат: Base64, подпись ECDSA (DER), хеш SHA-256.
         //
+        // Sender_signing_key_fingerprint:
+        // Идентификатор ключа подписи отправителя (SHA-256 отпечаток SPKI-ключа, HEX).
+        // Нужен получателю, чтобы быстро выбрать связанную тройку ключей.
+        //
         // Block_plain_text_length:
         // Длина открытого блока ФСС. По ней восстанавливается режим разбиения на блоки.
         //
@@ -39,6 +43,7 @@ namespace FNS_rebuild
         public string Encrypted_symmetric_key { get; set; } = "";
         public string Ephemeral_public_key { get; set; } = "";
         public string Ephemeral_public_key_signature { get; set; } = "";
+        public string Sender_signing_key_fingerprint { get; set; } = "";
         public int Block_plain_text_length { get; set; } = 0;
         public byte Curve_id { get; set; } = Hybrid_fns_cryptosystem.Curve_id_nist_p256;
     }

@@ -4,6 +4,7 @@
         Title="Настройки цифровой подписи и связывание ключей"
         Height="700"
         Width="1020"
+        WindowState="Maximized"
         MinWidth="760"
         MinHeight="500"
         Loaded="Window_Loaded"
@@ -92,6 +93,7 @@
     </Window.Resources>
 
     <Grid Margin="6">
+        <CheckBox x:Name="SignCiphertextCheckBox" Visibility="Collapsed" IsChecked="True" />
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
                 <Border Style="{StaticResource CardStyle}">
@@ -122,8 +124,9 @@
                                 BorderThickness="1.5"
                                 CornerRadius="7"
                                 Padding="12,8"
-                                Margin="14,0,0,0">
-                            <CheckBox x:Name="SignCiphertextCheckBox"
+                                Margin="14,0,0,0"
+                                Visibility="Collapsed">
+                            <CheckBox x:Name="LegacySignCiphertextCheckBox"
                                       Content="Подписывать шифротекст"
                                       IsChecked="True"
                                       FontSize="16"
@@ -135,6 +138,12 @@
                                       HorizontalContentAlignment="Left"
                                       Margin="0,1,0,0" />
                         </Border>
+                        <Button Grid.Column="1"
+                                Content="Переключатели режима"
+                                Visibility="Collapsed"
+                                Margin="14,0,0,0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource SecondaryButtonStyle}" />
                     </Grid>
                 </Border>
 
@@ -275,12 +284,12 @@
                                                     <TextBox Text="{Binding Recipient_name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                              Margin="0,0,0,10" />
 
-                                                    <TextBlock Margin="0,0,0,2">Публичный ключ подписи отправителя (ECDSA)</TextBlock>
+                                                    <TextBlock Margin="0,0,0,2">Ваш публичный ключ подписи отправителя (ECDSA)</TextBlock>
                                                     <TextBox Text="{Binding Sender_signing_public_key_spki, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                              IsEnabled="{Binding IsChecked, ElementName=SignCiphertextCheckBox}"
                                                              Margin="0,0,0,10" />
 
-                                                    <TextBlock Margin="0,0,0,2">Публичный ключ подписи получателя (ECDSA)</TextBlock>
+                                                    <TextBlock Margin="0,0,0,2">Доверенный публичный ключ подписи собеседника (ECDSA)</TextBlock>
                                                     <TextBox Text="{Binding Trusted_sender_signing_public_key, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                              IsEnabled="{Binding IsChecked, ElementName=SignCiphertextCheckBox}"
                                                              Margin="0,0,0,10" />

@@ -73,6 +73,28 @@ namespace FNS_graphics
             }
         }
 
+        internal static bool Try_get_active_recipient_link_snapshot(
+            out Recipient_key_link_entry active_link,
+            out string error_message)
+        {
+            lock (Sync_root)
+            {
+                Ensure_settings_loaded();
+
+                Recipient_key_link_entry? link = Find_active_recipient_link();
+                if (link is null)
+                {
+                    active_link = null!;
+                    error_message = "Нет активной связи ключей получателя.";
+                    return false;
+                }
+
+                active_link = Clone_recipient_link(link);
+                error_message = string.Empty;
+                return true;
+            }
+        }
+
         internal static void Save_settings(Digital_signature_settings input)
         {
             ArgumentNullException.ThrowIfNull(input);
@@ -107,6 +129,10 @@ namespace FNS_graphics
 
                 string unique_name = Ensure_unique_recipient_name(normalized_name, existing_names);
                 Sender_signing_key_entry sender_signing = Generate_new_signing_key_pair_entry();
+                string trusted_sender_signing_public_key = sender_signing.Public_key;
+                string receiver_hybrid_public_key = Try_get_local_receiver_public_key_spki_base64(out string local_receiver_public_key)
+                    ? local_receiver_public_key
+                    : Generate_receiver_hybrid_public_key_spki_base64();
 
                 return new Recipient_key_link_entry
                 {
@@ -114,8 +140,8 @@ namespace FNS_graphics
                     Recipient_name = unique_name,
                     Sender_signing_private_key_pkcs8 = sender_signing.Private_key_pkcs8,
                     Sender_signing_public_key_spki = sender_signing.Public_key,
-                    Trusted_sender_signing_public_key = Generate_sender_signing_public_key_spki_base64(),
-                    Receiver_hybrid_public_key = Generate_receiver_hybrid_public_key_spki_base64()
+                    Trusted_sender_signing_public_key = trusted_sender_signing_public_key,
+                    Receiver_hybrid_public_key = receiver_hybrid_public_key
                 };
             }
         }
@@ -195,6 +221,30 @@ namespace FNS_graphics
 
             error_message = "Публичный ключ получателя для гибридного шифрования должен быть SPKI-ключом ECDH в формате Base64.";
             return false;
+        }
+
+        internal static bool Try_get_sender_signing_key_fingerprint(
+            string sender_signing_public_key_spki,
+            out string key_fingerprint,
+            out string error_message)
+        {
+            key_fingerprint = string.Empty;
+            error_message = string.Empty;
+
+            string normalized_public_key = Normalize_base64_text(sender_signing_public_key_spki);
+            if (normalized_public_key.Length == 0)
+            {
+                error_message = "Публичный ключ подписи отправителя пуст.";
+                return false;
+            }
+
+            if (!Try_build_sender_signing_key_fingerprint_from_public_key(normalized_public_key, out key_fingerprint))
+            {
+                error_message = "Публичный ключ подписи отправителя должен быть корректным SPKI-ключом ECDSA в формате Base64.";
+                return false;
+            }
+
+            return true;
         }
 
         internal static bool Try_sign_cipher_package(
@@ -278,6 +328,76 @@ namespace FNS_graphics
             return false;
         }
 
+        internal static bool Try_verify_cipher_package_signature_and_select_recipient_link(
+            Hybrid_cipher_package packet,
+            out Recipient_key_link_entry matched_link,
+            out string error_message)
+        {
+            lock (Sync_root)
+            {
+                Ensure_settings_loaded();
+
+                matched_link = null!;
+                error_message = string.Empty;
+
+                if (packet is null)
+                {
+                    error_message = "Пакет шифрования не задан.";
+                    return false;
+                }
+
+                if (settings.Recipient_links.Count == 0)
+                {
+                    error_message = "Список связей ключей пуст.";
+                    return false;
+                }
+
+                if (!Try_build_canonical_package_payload(packet, out byte[] payload, out error_message))
+                    return false;
+
+                string normalized_signature = Normalize_base64_text(packet.Ephemeral_public_key_signature);
+                if (!Try_decode_base64(normalized_signature, out byte[] signature))
+                {
+                    error_message = "Подпись пакета некорректна: ожидается Base64-строка.";
+                    return false;
+                }
+
+                string preferred_sender_signing_key_fingerprint = Normalize_key_fingerprint(packet.Sender_signing_key_fingerprint);
+                List<Recipient_key_link_entry> candidates = Build_signature_verification_candidates(preferred_sender_signing_key_fingerprint);
+                if (preferred_sender_signing_key_fingerprint.Length > 0 && candidates.Count == 0)
+                {
+                    error_message = "Для отпечатка ключа подписи отправителя из пакета не найдена подходящая связь.";
+                    return false;
+                }
+
+                int valid_key_count = 0;
+                foreach (Recipient_key_link_entry candidate in candidates)
+                {
+                    string trusted_sender_key = Normalize_base64_text(candidate.Trusted_sender_signing_public_key);
+                    if (!Try_decode_base64(trusted_sender_key, out byte[] sender_public_key_spki))
+                        continue;
+
+                    valid_key_count++;
+                    if (!Try_verify_signature_payload_with_sender_key(payload, signature, sender_public_key_spki))
+                        continue;
+
+                    Try_activate_recipient_link_for_runtime(candidate.Link_id);
+                    matched_link = Clone_recipient_link(candidate);
+                    error_message = string.Empty;
+                    return true;
+                }
+
+                if (valid_key_count == 0)
+                {
+                    error_message = "В связях ключей нет ни одного корректного доверенного публичного ключа отправителя (ожидается Base64 SPKI).";
+                    return false;
+                }
+
+                error_message = "Проверка подписи не пройдена: пакет изменён или подписан недоверенным ключом.";
+                return false;
+            }
+        }
+
         static bool Try_build_canonical_package_payload(
             Hybrid_cipher_package packet,
             out byte[] payload,
@@ -295,6 +415,7 @@ namespace FNS_graphics
             string ciphertext = packet.Ciphertext ?? string.Empty;
             string normalized_ephemeral_key = Normalize_base64_text(packet.Ephemeral_public_key);
             string normalized_encrypted_symmetric_key = Normalize_base64_text(packet.Encrypted_symmetric_key);
+            string normalized_sender_signing_key_fingerprint = Normalize_key_fingerprint(packet.Sender_signing_key_fingerprint);
 
             if (!Try_decode_base64(normalized_ephemeral_key, out _))
             {
@@ -308,15 +429,23 @@ namespace FNS_graphics
                 return false;
             }
 
+            if (normalized_sender_signing_key_fingerprint.Length > 0 &&
+                !Is_valid_key_fingerprint(normalized_sender_signing_key_fingerprint))
+            {
+                error_message = "Отпечаток ключа подписи отправителя в пакете некорректен: ожидается HEX SHA-256.";
+                return false;
+            }
+
             using MemoryStream stream = new();
             using (BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true))
             {
-                Write_utf8_field(writer, "FNS_GRAPHICS_PACKET_SIGNATURE_V1");
+                Write_utf8_field(writer, "FNS_GRAPHICS_PACKET_SIGNATURE_V2");
                 writer.Write(packet.Curve_id);
                 writer.Write(packet.Block_plain_text_length);
                 Write_utf8_field(writer, ciphertext);
                 Write_utf8_field(writer, normalized_encrypted_symmetric_key);
                 Write_utf8_field(writer, normalized_ephemeral_key);
+                Write_utf8_field(writer, normalized_sender_signing_key_fingerprint);
                 writer.Flush();
             }
 
@@ -346,6 +475,77 @@ namespace FNS_graphics
             {
                 return false;
             }
+        }
+
+        static bool Try_build_sender_signing_key_fingerprint_from_public_key(string sender_signing_public_key_spki, out string key_fingerprint)
+        {
+            key_fingerprint = string.Empty;
+            string normalized_public_key = Normalize_base64_text(sender_signing_public_key_spki);
+            if (!Try_decode_base64(normalized_public_key, out byte[] key_bytes))
+                return false;
+
+            try
+            {
+                using ECDsa ecdsa = ECDsa.Create();
+                ecdsa.ImportSubjectPublicKeyInfo(key_bytes, out int read);
+                if (read != key_bytes.Length)
+                    return false;
+            }
+            catch
+            {
+                return false;
+            }
+
+            key_fingerprint = Convert.ToHexString(SHA256.HashData(key_bytes));
+            return true;
+        }
+
+        static List<Recipient_key_link_entry> Build_signature_verification_candidates(string preferred_sender_signing_key_fingerprint)
+        {
+            List<Recipient_key_link_entry> ordered = [];
+            HashSet<string> seen_link_ids = new(StringComparer.Ordinal);
+
+            if (preferred_sender_signing_key_fingerprint.Length == 0)
+            {
+                foreach (Recipient_key_link_entry link in settings.Recipient_links)
+                {
+                    if (seen_link_ids.Add(link.Link_id))
+                        ordered.Add(link);
+                }
+
+                return ordered;
+            }
+
+            foreach (Recipient_key_link_entry link in settings.Recipient_links)
+            {
+                if (!Try_build_sender_signing_key_fingerprint_from_public_key(
+                        link.Trusted_sender_signing_public_key,
+                        out string link_fingerprint))
+                {
+                    continue;
+                }
+
+                if (!string.Equals(link_fingerprint, preferred_sender_signing_key_fingerprint, StringComparison.Ordinal))
+                    continue;
+
+                if (seen_link_ids.Add(link.Link_id))
+                    ordered.Add(link);
+            }
+
+            return ordered;
+        }
+
+        static void Try_activate_recipient_link_for_runtime(string link_id)
+        {
+            string normalized_link_id = Normalize_identifier(link_id);
+            if (normalized_link_id.Length == 0)
+                return;
+
+            if (string.Equals(settings.Active_recipient_link_id, normalized_link_id, StringComparison.Ordinal))
+                return;
+
+            settings.Active_recipient_link_id = normalized_link_id;
+            Save_settings_file();
         }
 
         static void Ensure_settings_loaded()
@@ -540,6 +740,39 @@ namespace FNS_graphics
             return builder.ToString();
         }
 
+        static string Normalize_key_fingerprint(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            string source = value.Trim();
+            StringBuilder builder = new(source.Length);
+            foreach (char ch in source)
+            {
+                if (!char.IsWhiteSpace(ch))
+                    builder.Append(char.ToUpperInvariant(ch));
+            }
+
+            return builder.ToString();
+        }
+
+        static bool Is_valid_key_fingerprint(string value)
+        {
+            if (value.Length != 64)
+                return false;
+
+            for (int i = 0; i < value.Length; i++)
+            {
+                char ch = value[i];
+                bool is_digit = ch >= '0' && ch <= '9';
+                bool is_hex_letter = ch >= 'A' && ch <= 'F';
+                if (!is_digit && !is_hex_letter)
+                    return false;
+            }
+
+            return true;
+        }
+
         static List<string> Normalize_key_list(IEnumerable<string>? values)
         {
             List<string> result = [];
@@ -665,6 +898,28 @@ namespace FNS_graphics
             }
         }
 
+        static bool Try_get_local_receiver_public_key_spki_base64(out string receiver_public_key_spki_base64)
+        {
+            receiver_public_key_spki_base64 = string.Empty;
+
+            try
+            {
+                string receiver_private_key_path = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_private.pk8.b64");
+                string receiver_public_key_path = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_public.spki.b64");
+
+                using ECDiffieHellman receiver_private_key = Receiver_key_store.LoadOrCreate(
+                    receiver_private_key_path,
+                    receiver_public_key_path);
+
+                receiver_public_key_spki_base64 = Convert.ToBase64String(receiver_private_key.ExportSubjectPublicKeyInfo());
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         static bool Try_decode_base64(string encoded, out byte[] bytes)
         {
             int buffer_length = ((encoded.Length + 3) / 4) * 3;
@@ -709,6 +964,19 @@ namespace FNS_graphics
                     Private_key_pkcs8 = key.Private_key_pkcs8
                 })],
                 Trusted_sender_long_term_public_keys = [.. source.Trusted_sender_long_term_public_keys]
+            };
+        }
+
+        static Recipient_key_link_entry Clone_recipient_link(Recipient_key_link_entry source)
+        {
+            return new Recipient_key_link_entry
+            {
+                Link_id = source.Link_id,
+                Recipient_name = source.Recipient_name,
+                Sender_signing_private_key_pkcs8 = source.Sender_signing_private_key_pkcs8,
+                Sender_signing_public_key_spki = source.Sender_signing_public_key_spki,
+                Trusted_sender_signing_public_key = source.Trusted_sender_signing_public_key,
+                Receiver_hybrid_public_key = source.Receiver_hybrid_public_key
             };
         }
 

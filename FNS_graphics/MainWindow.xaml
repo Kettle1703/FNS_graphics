@@ -8,6 +8,7 @@
         Title="Панель шифрования и дешифрования"
         Height="760"
         Width="1000"
+        WindowState="Maximized"
         MinHeight="680"
         Loaded="Window_Loaded"
         MinWidth="860">
@@ -67,6 +68,25 @@
             <Setter Property="BorderBrush" Value="#FF5A996A" />
             <Setter Property="BorderThickness" Value="1" />
         </Style>
+
+        <Style x:Key="SoftToggleContainerStyle" TargetType="Border">
+            <Setter Property="Background" Value="#FFE2ECE3" />
+            <Setter Property="BorderBrush" Value="#FF9FB9A3" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="10,6" />
+        </Style>
+
+        <Style x:Key="SoftToggleCheckBoxStyle" TargetType="CheckBox">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#FF274235" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Margin" Value="0" />
+        </Style>
     </Window.Resources>
 
     <Window.CommandBindings>
@@ -80,6 +100,12 @@
     </Window.InputBindings>
 
     <Grid Margin="6">
+        <StackPanel Visibility="Collapsed">
+            <CheckBox x:Name="BuildJsonFileCheckBox" IsChecked="True" />
+            <CheckBox x:Name="DisableReedSolomonForJsonCheckBox" IsChecked="True" />
+            <CheckBox x:Name="AutoSenderKeyGenerationCheckBox" IsChecked="True" />
+        </StackPanel>
+
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Grid.IsSharedSizeScope="True">
                 <Border Style="{StaticResource CardStyle}">
@@ -90,13 +116,13 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Style="{StaticResource SectionTitleStyle}" Margin="0">Шифрование</TextBlock>
-                            <CheckBox x:Name="BuildJsonFileCheckBox"
-                                      Grid.Column="1"
-                                      Content="Собрать JSON файл"
-                                      IsChecked="False"
-                                      VerticalAlignment="Center"
-                                      HorizontalAlignment="Right"
-                                      Margin="12,0,0,0" />
+                            <Button Grid.Column="1"
+                                    Content="Настройки шифрования"
+                                    Click="SwitchesWindowButton_Click"
+                                    Margin="10,0,0,0"
+                                    Background="#FF6FAAE6"
+                                    BorderBrush="#FF567DA2"
+                                    Foreground="#FF1A3348" />
                         </Grid>
 
                         <Grid Margin="0,0,0,4">
@@ -124,7 +150,7 @@
                                 <ColumnDefinition Width="Auto" SharedSizeGroup="EncryptActionColumn" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="SourceTextBox" Grid.Column="0" />
-                            <Button x:Name="EncryptButton" Grid.Column="1" Content="Шифровать" Click="Encrypt_Click" Margin="8,0,10,0" />
+                            <Button x:Name="EncryptButton" Grid.Column="1" Content="Шифровать" Click="Encrypt_Click" Margin="8,0,0,0" />
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -135,19 +161,10 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Style="{StaticResource SectionTitleStyle}" Margin="0">Ключи гибридного шифрования ECDH</TextBlock>
-                            <CheckBox x:Name="AutoSenderKeyGenerationCheckBox"
-                                      Grid.Column="1"
-                                      Content="Автогенерация новых ключей"
-                                      IsChecked="True"
-                                      VerticalAlignment="Center"
-                                      Margin="12,0,0,0"
-                                      Checked="AutoSenderKeyGenerationChanged"
-                                      Unchecked="AutoSenderKeyGenerationChanged" />
-                            <Button Grid.Column="2"
-                                    Content="Цифровая подпись"
+                            <Button Grid.Column="1"
+                                    Content="Настройка связей ключей"
                                     Click="DigitalSignatureSettingsButton_Click"
                                     Margin="10,0,0,0"
                                     Background="#FF6FAAE6"
@@ -161,10 +178,23 @@
                         <TextBlock>Подпись пакета отправителя (ECDSA)</TextBlock>
                         <TextBox x:Name="SharedSenderPublicKeySignatureTextBox" Margin="0,0,0,8" />
 
-                        <TextBlock>Публичный ключ получателя (ECDH)</TextBlock>
-                        <TextBox x:Name="SharedReceiverPublicKeyTextBox" Margin="0,0,0,8" />
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Margin="0">Слепок публичного ключа подписи отправителя (SHA-256)</TextBlock>
+                            <TextBlock x:Name="ActiveRecipientLinkTextBlock"
+                                       Grid.Column="1"
+                                       Margin="8,0,0,0"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Foreground="#FF3F5A45"
+                                       Text="Связь: не выбрана" />
+                        </Grid>
+                        <TextBox x:Name="SharedReceiverPublicKeyFingerprintTextBox" IsReadOnly="True" Margin="0,0,0,8" />
 
-                        <TextBlock>Зашифрованный по ECC ключ для симметричного шифрования</TextBlock>
+                        <TextBlock>Защищённые данные для восстановления симметричного ключа</TextBlock>
                         <TextBox x:Name="SharedSessionKeyTextBox" IsReadOnly="True" Margin="0,0,0,8" />
 
                     </StackPanel>
@@ -172,7 +202,20 @@
 
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitleStyle}">Дешифрование</TextBlock>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Style="{StaticResource SectionTitleStyle}" Margin="0">Дешифрование</TextBlock>
+                            <Button Grid.Column="1"
+                                    Content="Выбрать JSON файл"
+                                    Click="SelectDecryptJsonFileButton_Click"
+                                    Margin="10,0,0,0"
+                                    Background="#FFD5E3D6"
+                                    BorderBrush="#FF8EA691"
+                                    Foreground="#FF2B4631" />
+                        </Grid>
 
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
@@ -199,7 +242,7 @@
                                 <ColumnDefinition Width="Auto" SharedSizeGroup="DecryptActionColumn" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="TransferCipherTextTextBox" Grid.Column="0" />
-                            <Button x:Name="DecryptButton" Grid.Column="1" Content="Дешифровать" Click="Decrypt_Click" Margin="8,0,10,0" />
+                            <Button x:Name="DecryptButton" Grid.Column="1" Content="Дешифровать" Click="Decrypt_Click" Margin="8,0,0,0" />
                         </Grid>
                     </StackPanel>
                 </Border>
