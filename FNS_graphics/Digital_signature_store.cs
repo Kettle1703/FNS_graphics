@@ -425,7 +425,7 @@ namespace FNS_graphics
 
             if (!Try_decode_base64(normalized_encrypted_symmetric_key, out _))
             {
-                error_message = "Поле защищённого симметрического ключа в пакете некорректно: ожидается Base64-строка.";
+                error_message = "Поле публичной соли для восстановления симметричного ключа в пакете некорректно: ожидается Base64-строка.";
                 return false;
             }
 
@@ -439,9 +439,10 @@ namespace FNS_graphics
             using MemoryStream stream = new();
             using (BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true))
             {
-                Write_utf8_field(writer, "FNS_GRAPHICS_PACKET_SIGNATURE_V2");
+                Write_utf8_field(writer, "FNS_GRAPHICS_PACKET_SIGNATURE_V3");
                 writer.Write(packet.Curve_id);
                 writer.Write(packet.Block_plain_text_length);
+                writer.Write(packet.Round_cipher_enabled);
                 Write_utf8_field(writer, ciphertext);
                 Write_utf8_field(writer, normalized_encrypted_symmetric_key);
                 Write_utf8_field(writer, normalized_ephemeral_key);

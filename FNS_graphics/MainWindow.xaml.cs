@@ -30,8 +30,6 @@ namespace FNS_graphics
 
         private static readonly string ReceiverPrivateKeyPath = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_private.pk8.b64");
         private static readonly string ReceiverPublicKeyPath = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_public.spki.b64");
-        private static readonly string TransferJsonDirectoryPath =
-            @"C:\Users\Mikhail\Desktop\Диплом\Программирование\FNS_graphics\FNS_graphics\encrypted_packets";
 
         private static readonly JsonSerializerOptions TransferJsonSerializerOptions = new()
         {
@@ -215,8 +213,9 @@ namespace FNS_graphics
                 Multiselect = false
             };
 
-            if (Directory.Exists(TransferJsonDirectoryPath))
-                dialog.InitialDirectory = TransferJsonDirectoryPath;
+            string transfer_json_directory_path = Get_transfer_json_directory_path();
+            if (Directory.Exists(transfer_json_directory_path))
+                dialog.InitialDirectory = transfer_json_directory_path;
 
             bool? result = dialog.ShowDialog(this);
             if (result != true)
@@ -289,6 +288,7 @@ namespace FNS_graphics
                     _activeRecipientReceiverPublicKeySpki,
                     _receiverPublicKeySpki,
                     DefaultBlockLength,
+                    IsRoundCipherEnabled(),
                     AutoPlaceholder,
                     out Encrypt_request request,
                     out string validation_error))
@@ -418,6 +418,7 @@ namespace FNS_graphics
                     SharedSessionKeyTextBox.Text,
                     SharedSenderPublicKeySignatureTextBox.Text,
                     DefaultBlockLength,
+                    IsRoundCipherEnabled(),
                     AutoPlaceholder,
                     out Hybrid_cipher_package packet,
                     out string validation_error))
@@ -659,7 +660,7 @@ namespace FNS_graphics
 
         private static string Build_decrypt_cryptography_error_message()
         {
-            return "Ошибка дешифрования: не удалось восстановить сеансовый ключ и проверить целостность пакета. " +
+            return "Ошибка дешифрования: не удалось восстановить симметрический материал и проверить целостность пакета. " +
                    "Обычно это означает, что пакет зашифрован не на ваш публичный ключ получателя или данные пакета повреждены.";
         }
 
@@ -716,6 +717,11 @@ namespace FNS_graphics
             return DisableReedSolomonForJsonCheckBox.IsChecked == true;
         }
 
+        private static bool IsRoundCipherEnabled()
+        {
+            return Ui_toggle_store.Get_snapshot().Enable_round_cipher;
+        }
+
         private void Load_ui_toggle_snapshot_into_controls()
         {
             // Подтягивает состояние интерфейсных переключателей из общего in-memory хранилища.
@@ -742,7 +748,7 @@ namespace FNS_graphics
                 _manualSenderContext ??= _hybrid.Create_sender_context();
 
             if (show_status_message)
-                StatusTextBlock.Text = "Автогенерация отключена. Ключ отправителя и защищённый сеансовый ключ будут постоянными.";
+                StatusTextBlock.Text = "Автогенерация отключена. Ключ отправителя и публичная соль восстановления симметричного ключа будут постоянными.";
         }
 
         private void DisposeManualSenderContext()
@@ -772,6 +778,8 @@ namespace FNS_graphics
 
             if (string.IsNullOrWhiteSpace(packet.Sender_signing_key_fingerprint))
                 packet.Sender_signing_key_fingerprint = _lastEncryptedPacket.Sender_signing_key_fingerprint;
+
+            packet.Round_cipher_enabled = _lastEncryptedPacket.Round_cipher_enabled;
         }
 
         private static Hybrid_cipher_package Clone_packet(Hybrid_cipher_package source)
@@ -784,6 +792,7 @@ namespace FNS_graphics
                 Ephemeral_public_key_signature = source.Ephemeral_public_key_signature,
                 Sender_signing_key_fingerprint = source.Sender_signing_key_fingerprint,
                 Block_plain_text_length = source.Block_plain_text_length,
+                Round_cipher_enabled = source.Round_cipher_enabled,
                 Curve_id = source.Curve_id
             };
         }
@@ -897,6 +906,7 @@ namespace FNS_graphics
                 Sender_signing_key_fingerprint = sender_fingerprint,
                 Encrypted_symmetric_key = encrypted_symmetric_key,
                 Block_plain_text_length = DefaultBlockLength,
+                Round_cipher_enabled = payload.Round_cipher_enabled,
                 Curve_id = Hybrid_fns_cryptosystem.Curve_id_nist_p256
             };
             return true;
@@ -926,13 +936,13 @@ namespace FNS_graphics
                 }
 
                 int total_shards = parsed.Data_shards + parsed.Parity_shards;
-                if (parsed.Shards_base64 is null || parsed.Shard_crc32 is null)
+                if (parsed.Shards_base64url is null || parsed.Shard_crc32 is null)
                 {
                     error_message = "JSON-пакет Reed-Solomon повреждён: отсутствуют шардовые данные.";
                     return false;
                 }
 
-                if (parsed.Shards_base64.Count != total_shards || parsed.Shard_crc32.Count != total_shards)
+                if (parsed.Shards_base64url.Count != total_shards || parsed.Shard_crc32.Count != total_shards)
                 {
                     error_message = "JSON-пакет Reed-Solomon повреждён: некорректное количество шардов.";
                     return false;
@@ -983,10 +993,11 @@ namespace FNS_graphics
 
             try
             {
-                Directory.CreateDirectory(TransferJsonDirectoryPath);
+                string transfer_json_directory_path = Get_transfer_json_directory_path();
+                Directory.CreateDirectory(transfer_json_directory_path);
 
                 string file_name = $"fns_transfer_{DateTime.Now:yyyyMMdd_HHmmss_fff}.json";
-                file_path = Path.Combine(TransferJsonDirectoryPath, file_name);
+                file_path = Path.Combine(transfer_json_directory_path, file_name);
 
                 Transfer_json_package payload = new()
                 {
@@ -994,6 +1005,7 @@ namespace FNS_graphics
                     Ephemeral_public_key_signature = packet.Ephemeral_public_key_signature,
                     Sender_signing_key_fingerprint = packet.Sender_signing_key_fingerprint,
                     Encrypted_symmetric_key = packet.Encrypted_symmetric_key,
+                    Round_cipher_enabled = packet.Round_cipher_enabled,
                     Ciphertext = packet.Ciphertext
                 };
 
@@ -1029,12 +1041,17 @@ namespace FNS_graphics
         {
             try
             {
-                Directory.CreateDirectory(TransferJsonDirectoryPath);
+                Directory.CreateDirectory(Get_transfer_json_directory_path());
             }
             catch
             {
                 // Папка создаётся в best-effort режиме.
             }
+        }
+
+        private static string Get_transfer_json_directory_path()
+        {
+            return Ui_toggle_store.Get_snapshot().Json_transfer_directory_path;
         }
 
         private sealed class Transfer_json_package
@@ -1052,6 +1069,9 @@ namespace FNS_graphics
             public string Encrypted_symmetric_key { get; set; } = string.Empty;
 
             [JsonPropertyOrder(5)]
+            public bool Round_cipher_enabled { get; set; } = true;
+
+            [JsonPropertyOrder(6)]
             public string Ciphertext { get; set; } = string.Empty;
         }
 

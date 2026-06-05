@@ -155,7 +155,7 @@
                             Этот ключ нужно передать собеседнику, чтобы он шифровал сообщения для вас (может быть отправлен по не защищённому каналу).
                         </TextBlock>
                         <TextBox x:Name="OwnReceiverPublicKeyTextBox"
-                                 IsReadOnly="True"
+                                 IsReadOnly="False"
                                  Margin="0,0,0,0" />
                     </StackPanel>
                 </Border>

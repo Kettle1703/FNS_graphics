@@ -194,7 +194,7 @@
                         </Grid>
                         <TextBox x:Name="SharedReceiverPublicKeyFingerprintTextBox" IsReadOnly="True" Margin="0,0,0,8" />
 
-                        <TextBlock>Защищённые данные для восстановления симметричного ключа</TextBlock>
+                        <TextBlock>Публичная соль для восстановления симметричного ключа</TextBlock>
                         <TextBox x:Name="SharedSessionKeyTextBox" IsReadOnly="True" Margin="0,0,0,8" />
 
                     </StackPanel>

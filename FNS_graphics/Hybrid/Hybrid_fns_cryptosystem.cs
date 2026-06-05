@@ -18,8 +18,8 @@ namespace FNS_rebuild
         // ФСС-шифротекст (после раундов вашего симметричного алгоритма).
         //
         // Encrypted_symmetric_key:
-        // Зашифрованный симметрический материал (seed для генерации подключей ФСС).
-        // Обёртка выполняется через AES-GCM ключом KEK, который выводится из master key.
+        // Открытый служебный материал для восстановления симметрического слоя ФСС.
+        // Сейчас это HKDF salt; seed ФСС обе стороны выводят из ECDH shared secret + salt.
         //
         // Ephemeral_public_key:
         // Публичный ключ временной (ephemeral) ECC-пары отправителя в формате SPKI, Base64.
@@ -45,22 +45,21 @@ namespace FNS_rebuild
         public string Ephemeral_public_key_signature { get; set; } = "";
         public string Sender_signing_key_fingerprint { get; set; } = "";
         public int Block_plain_text_length { get; set; } = 0;
+        public bool Round_cipher_enabled { get; set; } = true;
         public byte Curve_id { get; set; } = Hybrid_fns_cryptosystem.Curve_id_nist_p256;
     }
 
     internal sealed class Hybrid_sender_context : IDisposable
     {
         // Контекст отправителя для режима без автогенерации.
-        // Позволяет переиспользовать одну и ту же ephemeral-пару и служебные параметры обёртки.
+        // Позволяет переиспользовать одну и ту же ephemeral-пару и HKDF salt.
         internal ECDiffieHellman Sender_private_key { get; }
         internal byte[] Kdf_salt { get; }
-        internal byte[] Wrap_nonce { get; }
 
-        internal Hybrid_sender_context(ECDiffieHellman sender_private_key, byte[] kdf_salt, byte[] wrap_nonce)
+        internal Hybrid_sender_context(ECDiffieHellman sender_private_key, byte[] kdf_salt)
         {
             Sender_private_key = sender_private_key ?? throw new ArgumentNullException(nameof(sender_private_key));
             Kdf_salt = kdf_salt ?? throw new ArgumentNullException(nameof(kdf_salt));
-            Wrap_nonce = wrap_nonce ?? throw new ArgumentNullException(nameof(wrap_nonce));
         }
 
         public void Dispose()
@@ -85,15 +84,11 @@ namespace FNS_rebuild
         const int Derived_fss_key_symbols = 256;
         const int Kdf_salt_bytes = 32;
         const int Fss_seed_bytes = 32;
-        const int Aes_gcm_nonce_bytes = 12;
-        const int Aes_gcm_tag_bytes = 16;
 
         // Метки (domain separation labels) для HKDF/HMAC.
         // Нужны, чтобы разные этапы вывода ключей не пересекались по назначению.
         const string Master_key_info_label = "FNS_REBUILD_HYBRID_MASTER_KEY_V1";
-        const string Kek_info_label = "FNS_REBUILD_HYBRID_KEK_V1";
         const string Fss_seed_info_label = "FNS_REBUILD_HYBRID_FSS_SEED_V1";
-        const string Wrap_aad_label = "FNS_REBUILD_WRAP_AAD_V1";
         const string Subkey_stream_label = "FNS_REBUILD_SUBKEY_STREAM_V1";
         const string Alphabet_permutation_info_label = "FNS_REBUILD_HYBRID_ALPHABET_PERMUTATION_V1";
         const string Alphabet_shuffle_stream_label = "FNS_REBUILD_ALPHABET_SHUFFLE_STREAM_V1";
@@ -113,8 +108,7 @@ namespace FNS_rebuild
         {
             ECDiffieHellman sender_private_key = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             byte[] kdf_salt = RandomNumberGenerator.GetBytes(Kdf_salt_bytes);
-            byte[] wrap_nonce = RandomNumberGenerator.GetBytes(Aes_gcm_nonce_bytes);
-            return new Hybrid_sender_context(sender_private_key, kdf_salt, wrap_nonce);
+            return new Hybrid_sender_context(sender_private_key, kdf_salt);
         }
 
         internal Hybrid_cipher_package Encrypt(
@@ -126,7 +120,7 @@ namespace FNS_rebuild
             // Шифрование гибридной схемой.
             // На выходе формируется пакет, содержащий:
             // - сам ФСС-шифротекст;
-            // - зашифрованный симметрический материал;
+            // - служебный материал восстановления симметрического слоя;
             // - ephemeral публичный ключ.
             options ??= Cipher_options.Default;
 
@@ -151,7 +145,6 @@ namespace FNS_rebuild
                 byte[] kdf_salt = sender_context?.Kdf_salt ?? RandomNumberGenerator.GetBytes(Kdf_salt_bytes);
                 byte[] master_key = Derive_master_key(shared_secret, kdf_salt);
                 byte[] fss_seed = Derive_fss_seed(master_key);
-                byte[] key_encryption_key = Derive_key_encryption_key(master_key);
 
                 // На каждый пакет создаётся собственный перемешанный алфавит.
                 // Словари соответствий пересобираются заново и не переиспользуются между сообщениями.
@@ -163,26 +156,22 @@ namespace FNS_rebuild
                 Cipher_options effective_options = new()
                 {
                     Block_plain_text_length = options.Block_plain_text_length,
-                    Key = auto_fss_key
+                    Key = auto_fss_key,
+                    Enable_round_cipher = options.Enable_round_cipher
                 };
 
                 string fss_ciphertext = local_wrapper.Encrypt(source, effective_options);
 
-                // Отдельно шифруем seed (симметрический материал) через KEK,
-                // чтобы передавать его в пакете как encrypted_symmetric_key.
-                byte[] encrypted_symmetric_key = Wrap_symmetric_seed(
-                    fss_seed,
-                    key_encryption_key,
-                    kdf_salt,
-                    sender_context?.Wrap_nonce);
+                byte[] key_derivation_material = Build_key_derivation_material(kdf_salt);
                 byte[] ephemeral_public_key_spki = sender_ephemeral.ExportSubjectPublicKeyInfo();
 
                 return new Hybrid_cipher_package
                 {
                     Ciphertext = fss_ciphertext,
-                    Encrypted_symmetric_key = Base64_url_codec.Encode(encrypted_symmetric_key),
+                    Encrypted_symmetric_key = Base64_url_codec.Encode(key_derivation_material),
                     Ephemeral_public_key = Base64_url_codec.Encode(ephemeral_public_key_spki),
                     Block_plain_text_length = options.Block_plain_text_length,
+                    Round_cipher_enabled = options.Enable_round_cipher,
                     Curve_id = Curve_id_nist_p256
                 };
             }
@@ -206,7 +195,7 @@ namespace FNS_rebuild
             if (!Base64_url_codec.Try_decode(packet.Ephemeral_public_key, out byte[] ephemeral_public_key_spki))
                 throw new CryptographicException("Поле Ephemeral_public_key не является корректным Base64/Base64URL.");
 
-            if (!Base64_url_codec.Try_decode(packet.Encrypted_symmetric_key, out byte[] encrypted_symmetric_key))
+            if (!Base64_url_codec.Try_decode(packet.Encrypted_symmetric_key, out byte[] key_derivation_material))
                 throw new CryptographicException("Поле Encrypted_symmetric_key не является корректным Base64/Base64URL.");
 
             using ECDiffieHellman sender_ephemeral_public_holder = ECDiffieHellman.Create();
@@ -214,14 +203,13 @@ namespace FNS_rebuild
             if (read != ephemeral_public_key_spki.Length)
                 throw new CryptographicException("Не удалось полностью прочитать ephemeral публичный ключ отправителя.");
 
-            Parse_wrapped_seed(encrypted_symmetric_key, out byte[] kdf_salt, out byte[] nonce, out byte[] tag, out byte[] wrapped_seed);
+            byte[] kdf_salt = Parse_key_derivation_material(key_derivation_material);
 
             // Получатель восстанавливает тот же master key через свой приватный ключ
             // и ephemeral-публичный ключ отправителя.
             byte[] shared_secret = receiver_private_key.DeriveKeyMaterial(sender_ephemeral_public_holder.PublicKey);
             byte[] master_key = Derive_master_key(shared_secret, kdf_salt);
-            byte[] key_encryption_key = Derive_key_encryption_key(master_key);
-            byte[] fss_seed = Unwrap_symmetric_seed(wrapped_seed, key_encryption_key, nonce, tag, kdf_salt);
+            byte[] fss_seed = Derive_fss_seed(master_key);
 
             string shuffled_alphabet = Build_shuffled_alphabet(base_alphabet, master_key);
             Strategy_wrapper local_wrapper = Build_local_wrapper(shuffled_alphabet);
@@ -229,7 +217,8 @@ namespace FNS_rebuild
             Cipher_options effective_options = new()
             {
                 Block_plain_text_length = packet.Block_plain_text_length,
-                Key = auto_fss_key
+                Key = auto_fss_key,
+                Enable_round_cipher = packet.Round_cipher_enabled
             };
 
             return local_wrapper.Decrypt(packet.Ciphertext, effective_options);
@@ -242,13 +231,6 @@ namespace FNS_rebuild
             return Hkdf_sha256(shared_secret, salt, info, Master_key_bytes);
         }
 
-        static byte[] Derive_key_encryption_key(byte[] master_key)
-        {
-            // KEK (Key Encryption Key) для обёртки симметрического seed.
-            byte[] info = Encoding.UTF8.GetBytes(Kek_info_label);
-            return Hkdf_sha256(master_key, [], info, 32);
-        }
-
         static byte[] Derive_fss_seed(byte[] master_key)
         {
             // Seed, из которого разворачивается поток подключей ФСС.
@@ -256,93 +238,45 @@ namespace FNS_rebuild
             return Hkdf_sha256(master_key, [], info, Fss_seed_bytes);
         }
 
-        static byte[] Wrap_symmetric_seed(
-            byte[] fss_seed,
-            byte[] key_encryption_key,
-            byte[] kdf_salt,
-            byte[]? forced_nonce = null)
+        static byte[] Build_key_derivation_material(byte[] kdf_salt)
         {
-            // Обёртка симметрического seed через AES-GCM:
-            // в payload сохраняются salt, nonce, tag и ciphertext.
-            byte[] nonce = forced_nonce is null
-                ? RandomNumberGenerator.GetBytes(Aes_gcm_nonce_bytes)
-                : forced_nonce.ToArray();
-            if (nonce.Length != Aes_gcm_nonce_bytes)
-                throw new CryptographicException($"Некорректная длина nonce для обёртки seed: {nonce.Length}.");
-            byte[] ciphertext = new byte[fss_seed.Length];
-            byte[] tag = new byte[Aes_gcm_tag_bytes];
-            byte[] aad = Build_wrap_aad(kdf_salt);
-
-            using (AesGcm aes = new(key_encryption_key, Aes_gcm_tag_bytes))
-                aes.Encrypt(nonce, fss_seed, ciphertext, tag, aad);
+            if (kdf_salt.Length != Kdf_salt_bytes)
+                throw new CryptographicException($"Некорректная длина HKDF salt: {kdf_salt.Length}.");
 
             using MemoryStream memory = new();
             using BinaryWriter writer = new(memory, Encoding.UTF8, leaveOpen: true);
-            writer.Write((byte)1); // версия формата wrapped key
+            writer.Write((byte)2); // версия формата: только HKDF salt, без AES-GCM wrap
             writer.Write((byte)kdf_salt.Length);
-            writer.Write((byte)nonce.Length);
-            writer.Write((byte)tag.Length);
-            writer.Write((ushort)ciphertext.Length);
             writer.Write(kdf_salt);
-            writer.Write(nonce);
-            writer.Write(tag);
-            writer.Write(ciphertext);
             writer.Flush();
 
             return memory.ToArray();
         }
 
-        static void Parse_wrapped_seed(byte[] input, out byte[] kdf_salt, out byte[] nonce, out byte[] tag, out byte[] wrapped_seed)
+        static byte[] Parse_key_derivation_material(byte[] input)
         {
-            // Разбор бинарной структуры encrypted_symmetric_key.
+            // Разбор служебной структуры encrypted_symmetric_key:
+            // version=2 + длина salt + salt.
             using MemoryStream memory = new(input);
             using BinaryReader reader = new(memory, Encoding.UTF8, leaveOpen: true);
 
             byte version = reader.ReadByte();
-            if (version != 1)
+            if (version != 2)
                 throw new CryptographicException($"Неподдерживаемая версия encrypted_symmetric_key: {version}.");
 
             int salt_length = reader.ReadByte();
-            int nonce_length = reader.ReadByte();
-            int tag_length = reader.ReadByte();
-            int wrapped_length = reader.ReadUInt16();
-
-            if (salt_length <= 0 || nonce_length <= 0 || tag_length <= 0 || wrapped_length <= 0)
+            if (salt_length != Kdf_salt_bytes)
                 throw new CryptographicException("Некорректная структура encrypted_symmetric_key.");
 
-            kdf_salt = reader.ReadBytes(salt_length);
-            nonce = reader.ReadBytes(nonce_length);
-            tag = reader.ReadBytes(tag_length);
-            wrapped_seed = reader.ReadBytes(wrapped_length);
+            byte[] kdf_salt = reader.ReadBytes(salt_length);
 
-            if (kdf_salt.Length != salt_length || nonce.Length != nonce_length || tag.Length != tag_length || wrapped_seed.Length != wrapped_length)
+            if (kdf_salt.Length != salt_length)
                 throw new CryptographicException("encrypted_symmetric_key оборван или повреждён.");
 
             if (memory.Position != memory.Length)
                 throw new CryptographicException("encrypted_symmetric_key содержит лишние данные.");
-        }
 
-        static byte[] Unwrap_symmetric_seed(byte[] wrapped_seed, byte[] key_encryption_key, byte[] nonce, byte[] tag, byte[] kdf_salt)
-        {
-            // Обратная операция к Wrap_symmetric_seed.
-            byte[] result = new byte[wrapped_seed.Length];
-            byte[] aad = Build_wrap_aad(kdf_salt);
-
-            using (AesGcm aes = new(key_encryption_key, tag.Length))
-                aes.Decrypt(nonce, wrapped_seed, tag, result, aad);
-
-            return result;
-        }
-
-        static byte[] Build_wrap_aad(byte[] kdf_salt)
-        {
-            // Дополнительные аутентифицируемые данные для AES-GCM.
-            // Связывают обёртку seed с конкретным salt.
-            byte[] label = Encoding.UTF8.GetBytes(Wrap_aad_label);
-            byte[] result = new byte[label.Length + kdf_salt.Length];
-            Array.Copy(label, 0, result, 0, label.Length);
-            Array.Copy(kdf_salt, 0, result, label.Length, kdf_salt.Length);
-            return result;
+            return kdf_salt;
         }
 
         static string Derive_fss_subkey_stream(byte[] seed, int symbols_count, string alphabet)

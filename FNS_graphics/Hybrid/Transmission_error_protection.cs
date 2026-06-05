@@ -19,7 +19,7 @@ namespace FNS_rebuild
         public int Parity_shards { get; set; } = 4;
         public int Padding_size { get; set; } = 0;
         public uint Payload_crc32 { get; set; } = 0;
-        public List<string?> Shards_base64 { get; set; } = [];
+        public List<string?> Shards_base64url { get; set; } = [];
         public List<uint> Shard_crc32 { get; set; } = [];
     }
 
@@ -43,13 +43,13 @@ namespace FNS_rebuild
             int padding_size = rs.GetPaddingSize(payload.Length, data_shards);
             byte[][] shards = rs.ManagedEncode(payload, data_shards, parity_shards);
 
-            List<string?> shards_base64 = new(shards.Length);
+            List<string?> shards_base64url = new(shards.Length);
             List<uint> shard_crc32 = new(shards.Length);
 
             for (int i = 0; i < shards.Length; i++)
             {
                 byte[] shard = shards[i];
-                shards_base64.Add(Convert.ToBase64String(shard));
+                shards_base64url.Add(Base64_url_codec.Encode(shard));
                 shard_crc32.Add(Crc32.HashToUInt32(shard));
             }
 
@@ -59,7 +59,7 @@ namespace FNS_rebuild
                 Parity_shards = parity_shards,
                 Padding_size = padding_size,
                 Payload_crc32 = Crc32.HashToUInt32(payload),
-                Shards_base64 = shards_base64,
+                Shards_base64url = shards_base64url,
                 Shard_crc32 = shard_crc32
             };
         }
@@ -72,7 +72,7 @@ namespace FNS_rebuild
             int total_shards = packet.Data_shards + packet.Parity_shards;
             if (packet.Data_shards < 1 || packet.Parity_shards < 1)
                 throw new InvalidOperationException("Некорректные параметры Reed-Solomon в пакете.");
-            if (packet.Shards_base64.Count != total_shards || packet.Shard_crc32.Count != total_shards)
+            if (packet.Shards_base64url.Count != total_shards || packet.Shard_crc32.Count != total_shards)
                 throw new InvalidOperationException("Некорректное количество шардов или контрольных сумм в пакете.");
 
             byte[][] shards = new byte[total_shards][];
@@ -81,7 +81,7 @@ namespace FNS_rebuild
             // Любой шард с неверной CRC считаем потерянным, чтобы RS мог его восстановить.
             for (int i = 0; i < total_shards; i++)
             {
-                string? encoded = packet.Shards_base64[i];
+                string? encoded = packet.Shards_base64url[i];
                 if (string.IsNullOrWhiteSpace(encoded))
                 {
                     shards[i] = null!;
@@ -89,7 +89,7 @@ namespace FNS_rebuild
                     continue;
                 }
 
-                if (!TryDecodeBase64(encoded, out byte[] shard))
+                if (!Try_decode_strict_base64url(encoded, out byte[] shard))
                 {
                     shards[i] = null!;
                     missing_or_damaged++;
@@ -120,27 +120,25 @@ namespace FNS_rebuild
             return Encoding.UTF8.GetString(restored_payload);
         }
 
-        static bool TryDecodeBase64(string encoded, out byte[] bytes)
+        static bool Try_decode_strict_base64url(string encoded, out byte[] bytes)
         {
-            // Преобразует Base64 без исключений, чтобы не использовать FormatException как рабочий путь.
-            int buffer_length = ((encoded.Length + 3) / 4) * 3;
-            byte[] buffer = new byte[buffer_length];
+            bytes = [];
 
-            if (!Convert.TryFromBase64String(encoded, buffer, out int written))
+            for (int i = 0; i < encoded.Length; i++)
             {
-                bytes = [];
+                char ch = encoded[i];
+                bool is_upper = ch >= 'A' && ch <= 'Z';
+                bool is_lower = ch >= 'a' && ch <= 'z';
+                bool is_digit = ch >= '0' && ch <= '9';
+                bool is_url_symbol = ch == '-' || ch == '_';
+                if (!is_upper && !is_lower && !is_digit && !is_url_symbol)
+                    return false;
+            }
+
+            if (encoded.Length % 4 == 1)
                 return false;
-            }
 
-            if (written == buffer.Length)
-            {
-                bytes = buffer;
-                return true;
-            }
-
-            bytes = new byte[written];
-            Array.Copy(buffer, bytes, written);
-            return true;
+            return Base64_url_codec.Try_decode(encoded, out bytes);
         }
     }
 }

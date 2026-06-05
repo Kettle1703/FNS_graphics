@@ -24,6 +24,7 @@ namespace FNS_graphics
             string? receiver_public_base64,
             byte[] default_receiver_public_spki,
             int block_plain_text_length,
+            bool enable_round_cipher,
             string auto_placeholder,
             out Encrypt_request request,
             out string error_message)
@@ -53,7 +54,8 @@ namespace FNS_graphics
             Cipher_options options = new()
             {
                 Block_plain_text_length = block_plain_text_length,
-                Key = string.Empty
+                Key = string.Empty,
+                Enable_round_cipher = enable_round_cipher
             };
 
             request = new Encrypt_request(source, receiver_public_spki, options);
@@ -67,6 +69,7 @@ namespace FNS_graphics
             string? encrypted_symmetric_key_text,
             string? sender_public_key_signature_text,
             int block_plain_text_length,
+            bool enable_round_cipher,
             string auto_placeholder,
             out Hybrid_cipher_package packet,
             out string error_message)
@@ -94,7 +97,7 @@ namespace FNS_graphics
             if (string.IsNullOrWhiteSpace(encrypted_symmetric_key) || encrypted_symmetric_key == auto_placeholder)
             {
                 packet = null!;
-                error_message = "Поле защищённого сеансового ключа не заполнено.";
+                error_message = "Поле публичной соли для восстановления симметричного ключа не заполнено.";
                 return false;
             }
 
@@ -122,6 +125,7 @@ namespace FNS_graphics
                     ? string.Empty
                     : sender_public_key_signature,
                 Block_plain_text_length = block_plain_text_length,
+                Round_cipher_enabled = enable_round_cipher,
                 Curve_id = Hybrid_fns_cryptosystem.Curve_id_nist_p256
             };
 

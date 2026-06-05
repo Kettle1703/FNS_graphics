@@ -2,10 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Переключатели режимов"
-        Height="520"
-        Width="860"
-        MinHeight="420"
-        MinWidth="700"
+        Height="540"
+        Width="780"
+
         Loaded="Window_Loaded"
         Closed="Window_Closed">
     <Window.Resources>
@@ -50,6 +49,20 @@
             <Setter Property="BorderThickness" Value="1" />
         </Style>
 
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="BorderBrush" Value="#FFB6CCB8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background" Value="#FFFFFFFF" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="HorizontalScrollBarVisibility" Value="Hidden" />
+        </Style>
+
         <Style x:Key="SoftToggleContainerStyle" TargetType="Border">
             <Setter Property="Background" Value="#FFE2ECE3" />
             <Setter Property="BorderBrush" Value="#FF9FB9A3" />
@@ -81,9 +94,13 @@
                         </TextBlock>
                         <Border Style="{StaticResource SoftToggleContainerStyle}" Margin="0,0,0,8">
                             <CheckBox x:Name="BuildJsonFileCheckBox"
-                                      Content="Собрирать JSON файл"
+                                      Content="Собирать JSON файл"
+                                      Checked="BuildJsonFileCheckBox_Changed"
+                                      Unchecked="BuildJsonFileCheckBox_Changed"
                                       Style="{StaticResource SoftToggleCheckBoxStyle}" />
                         </Border>
+                        <TextBlock Margin="0,2,0,6">Укажите папку для сохранения JSON файлов</TextBlock>
+                        <TextBox x:Name="JsonTransferDirectoryTextBox" Margin="0,0,0,8" />
                     </StackPanel>
                 </Border>
 
@@ -108,6 +125,19 @@
                         <Border Style="{StaticResource SoftToggleContainerStyle}" Margin="0,0,0,8">
                             <CheckBox x:Name="AutoSenderKeyGenerationCheckBox"
                                       Content="Автогенерация новых ключей"
+                                      Style="{StaticResource SoftToggleCheckBoxStyle}" />
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}">
+                            Повысить безопасность раундовым шифрованием
+                        </TextBlock>
+                        <Border Style="{StaticResource SoftToggleContainerStyle}" Margin="0,0,0,8">
+                            <CheckBox x:Name="EnableRoundCipherCheckBox"
+                                      Content="Включить раундовое шифрование"
                                       Style="{StaticResource SoftToggleCheckBoxStyle}" />
                         </Border>
                     </StackPanel>
