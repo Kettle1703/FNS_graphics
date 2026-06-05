@@ -83,23 +83,27 @@ namespace FNS_graphics
                 return 2;
             }
 
-            Console.WriteLine("CLI: запуск стохастического тестирования шифрования FNS...");
+            Console.WriteLine("CLI: запуск стохастического тестирования шифрования...");
+            Console.WriteLine($"Ядро шифрования: {options.Core_display_name}");
             Console.WriteLine($"Диапазон длин: {options.Min_length}..{options.Max_length}");
             Console.WriteLine($"Шаг по длине: {options.Length_step}");
             Console.WriteLine($"Тестов на длину: {options.Tests_per_length}");
             Console.WriteLine($"Шаг отчёта прогресса: {options.Progress_step}");
+            Console.WriteLine($"Длина открытого блока: {(options.Block_plain_text_length > 0 ? options.Block_plain_text_length.ToString() : "отключено")}");
             Console.WriteLine();
 
             try
             {
-                Strategy_wrapper wrapper = Build_fns_wrapper();
+                Strategy_wrapper wrapper = Build_strategy_wrapper(options.Encryption_core);
+                Cipher_options? cipher_options = Build_stochastic_cipher_options(options);
                 bool success = Stochastic_tests_encryption.Run_round_trip_tests(
                     wrapper,
                     options.Min_length,
                     options.Max_length,
                     options.Tests_per_length,
                     options.Progress_step,
-                    options.Length_step);
+                    options.Length_step,
+                    cipher_options);
 
                 Console.WriteLine();
                 Console.WriteLine(success
@@ -158,6 +162,35 @@ namespace FNS_graphics
         {
             // Создаёт рабочую стратегию шифрования ФСС для CLI-задач.
             return new Strategy_wrapper(new Factorial_strategy());
+        }
+
+        static Strategy_wrapper Build_strategy_wrapper(Encryption_core_kind encryption_core)
+        {
+            return encryption_core switch
+            {
+                Encryption_core_kind.KuznyechikCbc => new Strategy_wrapper(new Kuznyechik_strategy()),
+                Encryption_core_kind.AesGcm => new Strategy_wrapper(new Aes_gcm_strategy()),
+                _ => Build_fns_wrapper()
+            };
+        }
+
+        static Cipher_options? Build_stochastic_cipher_options(Stochastic_cli_options options)
+        {
+            Encryption_core_kind encryption_core = options.Encryption_core;
+            if (encryption_core != Encryption_core_kind.KuznyechikCbc &&
+                encryption_core != Encryption_core_kind.AesGcm &&
+                options.Block_plain_text_length <= 0)
+                return null;
+
+            return new Cipher_options
+            {
+                Block_plain_text_length = encryption_core == Encryption_core_kind.Factorial
+                    ? options.Block_plain_text_length
+                    : 0,
+                Key = "STOCHASTIC_CORE_TEST_KEY_256",
+                Enable_round_cipher = encryption_core == Encryption_core_kind.Factorial,
+                Encryption_core = encryption_core
+            };
         }
 
         static void Bind_console()
@@ -282,6 +315,8 @@ namespace FNS_graphics
             Console.WriteLine("  --tests-per-length N  Количество раундов Encrypt->Decrypt на каждую длину (по умолчанию 1).");
             Console.WriteLine("  --progress-step N     Печать прогресса после каждых N обработанных длин (по умолчанию 500).");
             Console.WriteLine("  --length-step N       Шаг перебора длин (по умолчанию 1).");
+            Console.WriteLine("  --block-length N      Длина открытого блока для ФСС; 0 отключает блочный режим.");
+            Console.WriteLine("  --core NAME           Ядро: fns/factorial, kuz/kuznyechik/grasshopper или aes/aes-gcm.");
             Console.WriteLine("  --pause-on-exit       Ждать Enter перед завершением процесса.");
             Console.WriteLine("  --help                Показать справку только по этой команде.");
             Console.WriteLine();
@@ -304,6 +339,14 @@ namespace FNS_graphics
             internal int Tests_per_length { get; private init; } = Stochastic_tests_encryption.Fast_tests_per_length;
             internal int Progress_step { get; private init; } = Stochastic_tests_encryption.Fast_progress_step;
             internal int Length_step { get; private init; } = Stochastic_tests_encryption.Fast_length_step;
+            internal int Block_plain_text_length { get; private init; }
+            internal Encryption_core_kind Encryption_core { get; private init; } = Encryption_core_kind.Factorial;
+            internal string Core_display_name => Encryption_core switch
+            {
+                Encryption_core_kind.KuznyechikCbc => Encryption_core_catalog.Kuznyechik_cbc_display_name,
+                Encryption_core_kind.AesGcm => Encryption_core_catalog.Aes_gcm_display_name,
+                _ => Encryption_core_catalog.Factorial_display_name
+            };
             internal bool Pause_on_exit { get; private init; }
 
             internal static Stochastic_cli_options Parse(string[] args)
@@ -314,6 +357,8 @@ namespace FNS_graphics
                 int tests_per_length = Stochastic_tests_encryption.Fast_tests_per_length;
                 int progress_step = Stochastic_tests_encryption.Fast_progress_step;
                 int length_step = Stochastic_tests_encryption.Fast_length_step;
+                int block_plain_text_length = 0;
+                Encryption_core_kind encryption_core = Encryption_core_kind.Factorial;
                 bool pause_on_exit = false;
 
                 for (int i = 0; i < args.Length; i++)
@@ -356,10 +401,23 @@ namespace FNS_graphics
                         continue;
                     }
 
+                    if (Try_read_int_option(args, ref i, "--block-length", arg, out int block_length) ||
+                        Try_read_int_option(args, ref i, "--block-size", arg, out block_length))
+                    {
+                        block_plain_text_length = block_length;
+                        continue;
+                    }
+
+                    if (Try_read_string_option(args, ref i, "--core", arg, out string core))
+                    {
+                        encryption_core = Parse_encryption_core(core);
+                        continue;
+                    }
+
                     throw new ArgumentException($"Неизвестный параметр: {arg}");
                 }
 
-                Validate(min_length, max_length, tests_per_length, progress_step, length_step);
+                Validate(min_length, max_length, tests_per_length, progress_step, length_step, block_plain_text_length);
 
                 return new Stochastic_cli_options
                 {
@@ -368,7 +426,21 @@ namespace FNS_graphics
                     Tests_per_length = tests_per_length,
                     Progress_step = progress_step,
                     Length_step = length_step,
+                    Block_plain_text_length = block_plain_text_length,
+                    Encryption_core = encryption_core,
                     Pause_on_exit = pause_on_exit
+                };
+            }
+
+            static Encryption_core_kind Parse_encryption_core(string value)
+            {
+                string normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+                return normalized switch
+                {
+                    "kuz" or "kuznyechik" or "grasshopper" or "кузнечик" => Encryption_core_kind.KuznyechikCbc,
+                    "aes" or "aes-gcm" or "aesgcm" => Encryption_core_kind.AesGcm,
+                    "fns" or "factorial" or "фсс" => Encryption_core_kind.Factorial,
+                    _ => throw new ArgumentException($"Неизвестное ядро шифрования: {value}")
                 };
             }
 
@@ -398,7 +470,34 @@ namespace FNS_graphics
                 return true;
             }
 
-            static void Validate(int min_length, int max_length, int tests_per_length, int progress_step, int length_step)
+            static bool Try_read_string_option(string[] args, ref int index, string option_name, string current_arg, out string value)
+            {
+                value = string.Empty;
+
+                string prefix = option_name + "=";
+                if (current_arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = current_arg[prefix.Length..];
+                    if (string.IsNullOrWhiteSpace(value))
+                        throw new ArgumentException($"Для {option_name} нужно указать значение.");
+                    return true;
+                }
+
+                if (!string.Equals(current_arg, option_name, StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                if (index + 1 >= args.Length)
+                    throw new ArgumentException($"Для {option_name} нужно указать значение.");
+
+                index++;
+                value = args[index];
+                if (string.IsNullOrWhiteSpace(value))
+                    throw new ArgumentException($"Для {option_name} нужно указать значение.");
+
+                return true;
+            }
+
+            static void Validate(int min_length, int max_length, int tests_per_length, int progress_step, int length_step, int block_plain_text_length)
             {
                 // Проверяет диапазоны значений CLI-параметров стохастического теста.
                 if (min_length < 1)
@@ -415,6 +514,9 @@ namespace FNS_graphics
 
                 if (length_step < 1)
                     throw new ArgumentOutOfRangeException(nameof(length_step), "Шаг длины должен быть >= 1.");
+
+                if (block_plain_text_length < 0)
+                    throw new ArgumentOutOfRangeException(nameof(block_plain_text_length), "Длина блока должна быть >= 0.");
             }
         }
     }

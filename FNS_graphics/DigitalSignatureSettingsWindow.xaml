@@ -154,33 +154,21 @@
                         <TextBlock Margin="0,0,0,8">
                             Этот ключ нужно передать собеседнику, чтобы он шифровал сообщения для вас (может быть отправлен по не защищённому каналу).
                         </TextBlock>
-                        <TextBox x:Name="OwnReceiverPublicKeyTextBox"
-                                 IsReadOnly="False"
-                                 Margin="0,0,0,0" />
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource CardStyle}">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8">Генератор ключей</TextBlock>
-
-                        <TextBlock Margin="0,0,0,8">
-                            Сгенерированный ключ можно скопировать и вручную вставить в поле нужной связи.
-                        </TextBlock>
-                        <TextBox x:Name="GeneratedKeyTextBox" Margin="0,0,0,8" />
-
-                        <StackPanel Orientation="Horizontal"
-                                    HorizontalAlignment="Right"
-                                    Margin="0,0,0,0">
-                            <Button Content="Сгенерировать ключ ECDSA"
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="OwnReceiverPublicKeyTextBox"
+                                     Grid.Column="0"
+                                     IsReadOnly="False"
+                                     Margin="0,0,8,0" />
+                            <Button Grid.Column="1"
+                                    Content="Новый ключ ECDH"
                                     Style="{StaticResource SecondaryButtonStyle}"
-                                    Click="GenerateSenderSigningPublicKeyButton_Click"
-                                    Margin="0,0,8,0" />
-                            <Button Content="Сгенерировать ключ ECDH"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Click="GenerateReceiverHybridPublicKeyButton_Click"
+                                    Click="GenerateReceiverHybridKeyButton_Click"
                                     Margin="0" />
-                        </StackPanel>
+                        </Grid>
                     </StackPanel>
                 </Border>
 
@@ -205,7 +193,7 @@
                                     <LineBreak />
                                     2) Для каждого нового получателя создаётся новая связь
                                     <LineBreak />
-                                    3) Ключи можно менять, но не на произвольные, а на сгенерированные из Генератора ключей выше
+                                    3) Новый ваш ключ подписи создаётся кнопкой внутри нужной связи
                                 </TextBlock>
                             </StackPanel>
 
@@ -262,10 +250,10 @@
                                                         Click="SelectRecipientLinkButton_Click"
                                                         Margin="0,0,8,0" />
                                                 <Button Grid.Column="2"
-                                                        Content="Перегенерировать"
+                                                        Content="Новый ключ подписи"
                                                         Style="{StaticResource SecondaryButtonStyle}"
                                                         Tag="{Binding Runtime_key}"
-                                                        Click="RegenerateRecipientLinkButton_Click"
+                                                        Click="GenerateRecipientSigningKeyButton_Click"
                                                         Margin="0,0,8,0" />
                                                 <Button Grid.Column="3"
                                                         Content="Удалить"

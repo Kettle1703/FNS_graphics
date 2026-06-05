@@ -1,10 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Threading;
-using static System.Console;
-using Digit = System.UInt16;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -46,6 +42,7 @@ namespace FNS_rebuild
         public string Sender_signing_key_fingerprint { get; set; } = "";
         public int Block_plain_text_length { get; set; } = 0;
         public bool Round_cipher_enabled { get; set; } = true;
+        public Encryption_core_kind Encryption_core { get; set; } = Encryption_core_kind.Factorial;
         public byte Curve_id { get; set; } = Hybrid_fns_cryptosystem.Curve_id_nist_p256;
     }
 
@@ -115,7 +112,8 @@ namespace FNS_rebuild
             string source,
             byte[] receiver_public_key_spki,
             Cipher_options? options = null,
-            Hybrid_sender_context? sender_context = null)
+            Hybrid_sender_context? sender_context = null,
+            Crypto_operation_timing? timing = null)
         {
             // Шифрование гибридной схемой.
             // На выходе формируется пакет, содержащий:
@@ -146,32 +144,24 @@ namespace FNS_rebuild
                 byte[] master_key = Derive_master_key(shared_secret, kdf_salt);
                 byte[] fss_seed = Derive_fss_seed(master_key);
 
-                // На каждый пакет создаётся собственный перемешанный алфавит.
-                // Словари соответствий пересобираются заново и не переиспользуются между сообщениями.
-                string shuffled_alphabet = Build_shuffled_alphabet(base_alphabet, master_key);
-                Strategy_wrapper local_wrapper = Build_local_wrapper(shuffled_alphabet);
-
-                // Симметрический ключ для текущего ФСС-ядра генерируется автоматически из seed.
-                string auto_fss_key = Derive_fss_subkey_stream(fss_seed, Derived_fss_key_symbols, shuffled_alphabet);
-                Cipher_options effective_options = new()
+                string ciphertext = Measure_core(timing, () => options.Encryption_core switch
                 {
-                    Block_plain_text_length = options.Block_plain_text_length,
-                    Key = auto_fss_key,
-                    Enable_round_cipher = options.Enable_round_cipher
-                };
-
-                string fss_ciphertext = local_wrapper.Encrypt(source, effective_options);
+                    Encryption_core_kind.KuznyechikCbc => Encrypt_with_kuznyechik(source, fss_seed, options),
+                    Encryption_core_kind.AesGcm => Encrypt_with_aes_gcm(source, fss_seed, options),
+                    _ => Encrypt_with_factorial(source, master_key, fss_seed, options)
+                });
 
                 byte[] key_derivation_material = Build_key_derivation_material(kdf_salt);
                 byte[] ephemeral_public_key_spki = sender_ephemeral.ExportSubjectPublicKeyInfo();
 
                 return new Hybrid_cipher_package
                 {
-                    Ciphertext = fss_ciphertext,
+                    Ciphertext = ciphertext,
                     Encrypted_symmetric_key = Base64_url_codec.Encode(key_derivation_material),
                     Ephemeral_public_key = Base64_url_codec.Encode(ephemeral_public_key_spki),
                     Block_plain_text_length = options.Block_plain_text_length,
                     Round_cipher_enabled = options.Enable_round_cipher,
+                    Encryption_core = options.Encryption_core,
                     Curve_id = Curve_id_nist_p256
                 };
             }
@@ -181,7 +171,10 @@ namespace FNS_rebuild
             }
         }
 
-        internal string Decrypt(Hybrid_cipher_package packet, ECDiffieHellman receiver_private_key)
+        internal string Decrypt(
+            Hybrid_cipher_package packet,
+            ECDiffieHellman receiver_private_key,
+            Crypto_operation_timing? timing = null)
         {
             // Дешифрование гибридной схемы.
             // Из packet + приватного ключа получателя восстанавливается тот же master key,
@@ -211,14 +204,104 @@ namespace FNS_rebuild
             byte[] master_key = Derive_master_key(shared_secret, kdf_salt);
             byte[] fss_seed = Derive_fss_seed(master_key);
 
+            return Measure_core(timing, () => packet.Encryption_core switch
+            {
+                Encryption_core_kind.KuznyechikCbc => Decrypt_with_kuznyechik(packet, fss_seed),
+                Encryption_core_kind.AesGcm => Decrypt_with_aes_gcm(packet, fss_seed),
+                _ => Decrypt_with_factorial(packet, master_key, fss_seed)
+            });
+        }
+
+        static T Measure_core<T>(Crypto_operation_timing? timing, Func<T> action)
+        {
+            return timing is null
+                ? action()
+                : timing.Measure_core(action);
+        }
+
+        string Encrypt_with_factorial(string source, byte[] master_key, byte[] fss_seed, Cipher_options options)
+        {
             string shuffled_alphabet = Build_shuffled_alphabet(base_alphabet, master_key);
-            Strategy_wrapper local_wrapper = Build_local_wrapper(shuffled_alphabet);
+            Strategy_wrapper local_wrapper = Build_factorial_wrapper(shuffled_alphabet);
+            string auto_fss_key = Derive_fss_subkey_stream(fss_seed, Derived_fss_key_symbols, shuffled_alphabet);
+            Cipher_options effective_options = new()
+            {
+                Block_plain_text_length = options.Block_plain_text_length,
+                Key = auto_fss_key,
+                Enable_round_cipher = options.Enable_round_cipher,
+                Encryption_core = Encryption_core_kind.Factorial
+            };
+
+            return local_wrapper.Encrypt(source, effective_options);
+        }
+
+        string Decrypt_with_factorial(Hybrid_cipher_package packet, byte[] master_key, byte[] fss_seed)
+        {
+            string shuffled_alphabet = Build_shuffled_alphabet(base_alphabet, master_key);
+            Strategy_wrapper local_wrapper = Build_factorial_wrapper(shuffled_alphabet);
             string auto_fss_key = Derive_fss_subkey_stream(fss_seed, Derived_fss_key_symbols, shuffled_alphabet);
             Cipher_options effective_options = new()
             {
                 Block_plain_text_length = packet.Block_plain_text_length,
                 Key = auto_fss_key,
-                Enable_round_cipher = packet.Round_cipher_enabled
+                Enable_round_cipher = packet.Round_cipher_enabled,
+                Encryption_core = Encryption_core_kind.Factorial
+            };
+
+            return local_wrapper.Decrypt(packet.Ciphertext, effective_options);
+        }
+
+        static string Encrypt_with_kuznyechik(string source, byte[] fss_seed, Cipher_options options)
+        {
+            Strategy_wrapper local_wrapper = Build_kuznyechik_wrapper();
+            Cipher_options effective_options = new()
+            {
+                Block_plain_text_length = 0,
+                Key = Base64_url_codec.Encode(fss_seed),
+                Enable_round_cipher = false,
+                Encryption_core = Encryption_core_kind.KuznyechikCbc
+            };
+
+            return local_wrapper.Encrypt(source, effective_options);
+        }
+
+        static string Decrypt_with_kuznyechik(Hybrid_cipher_package packet, byte[] fss_seed)
+        {
+            Strategy_wrapper local_wrapper = Build_kuznyechik_wrapper();
+            Cipher_options effective_options = new()
+            {
+                Block_plain_text_length = 0,
+                Key = Base64_url_codec.Encode(fss_seed),
+                Enable_round_cipher = false,
+                Encryption_core = Encryption_core_kind.KuznyechikCbc
+            };
+
+            return local_wrapper.Decrypt(packet.Ciphertext, effective_options);
+        }
+
+        static string Encrypt_with_aes_gcm(string source, byte[] fss_seed, Cipher_options options)
+        {
+            Strategy_wrapper local_wrapper = Build_aes_gcm_wrapper();
+            Cipher_options effective_options = new()
+            {
+                Block_plain_text_length = 0,
+                Key = Base64_url_codec.Encode(fss_seed),
+                Enable_round_cipher = false,
+                Encryption_core = Encryption_core_kind.AesGcm
+            };
+
+            return local_wrapper.Encrypt(source, effective_options);
+        }
+
+        static string Decrypt_with_aes_gcm(Hybrid_cipher_package packet, byte[] fss_seed)
+        {
+            Strategy_wrapper local_wrapper = Build_aes_gcm_wrapper();
+            Cipher_options effective_options = new()
+            {
+                Block_plain_text_length = 0,
+                Key = Base64_url_codec.Encode(fss_seed),
+                Enable_round_cipher = false,
+                Encryption_core = Encryption_core_kind.AesGcm
             };
 
             return local_wrapper.Decrypt(packet.Ciphertext, effective_options);
@@ -335,13 +418,23 @@ namespace FNS_rebuild
             return result.ToString();
         }
 
-        static Strategy_wrapper Build_local_wrapper(string alphabet)
+        static Strategy_wrapper Build_factorial_wrapper(string alphabet)
         {
             // КЛЮЧЕВАЯ ТОЧКА ПЕРЕСБОРКИ СЛОВАРЕЙ:
             // Конструктор Factorial_strategy(alphabet) очищает и строит заново:
             // char_to_number, number_to_char, byte_to_char, char_to_byte.
             // Это и есть пересчёт таблиц для конкретного сообщения.
             return new Strategy_wrapper(new Factorial_strategy(alphabet));
+        }
+
+        static Strategy_wrapper Build_kuznyechik_wrapper()
+        {
+            return new Strategy_wrapper(new Kuznyechik_strategy());
+        }
+
+        static Strategy_wrapper Build_aes_gcm_wrapper()
+        {
+            return new Strategy_wrapper(new Aes_gcm_strategy());
         }
 
         static string Build_shuffled_alphabet(string alphabet, byte[] master_key)

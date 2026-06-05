@@ -1,9 +1,5 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using static System.Console;
 using Digit = System.UInt16;
 namespace FNS_rebuild
 {

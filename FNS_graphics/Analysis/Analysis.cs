@@ -400,7 +400,9 @@ namespace FNS_rebuild
             return new Cipher_options
             {
                 Block_plain_text_length = source.Block_plain_text_length,
-                Key = key
+                Key = key,
+                Enable_round_cipher = source.Enable_round_cipher,
+                Encryption_core = source.Encryption_core
             };
         }
 

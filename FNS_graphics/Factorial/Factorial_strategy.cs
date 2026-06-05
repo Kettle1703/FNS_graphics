@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using static System.Console;
 using Digit = System.UInt16;
 using System.Text;
@@ -182,22 +183,19 @@ namespace FNS_rebuild
             Write_u16(output, block_plain_text_length);
             Write_bytes_as_chars(output, message_nonce);
 
-            int offset = 0;
-            int block_index = 0;
-            while (offset < source_text_length)
+            int block_count = Calculate_block_count(source_text_length, block_plain_text_length);
+            string[] encrypted_blocks = new string[block_count];
+
+            Parallel.For(0, block_count, block_index =>
             {
-                int current_block_length = block_plain_text_length;
-                int remaining = source_text_length - offset;
-                if (current_block_length > remaining)
-                    current_block_length = remaining;
-
+                int offset = block_index * block_plain_text_length;
+                int current_block_length = Get_plain_block_length(source_text_length, block_plain_text_length, block_index);
                 string block_source = input.Substring(offset, current_block_length);
-                string block_encrypted = Encrypt_single_block(block_source, options, message_nonce, block_index);
-                output.Append(block_encrypted);
+                encrypted_blocks[block_index] = Encrypt_single_block(block_source, options, message_nonce, block_index);
+            });
 
-                offset += current_block_length;
-                block_index++;
-            }
+            for (int block_index = 0; block_index < encrypted_blocks.Length; block_index++)
+                output.Append(encrypted_blocks[block_index]);
 
             return output.ToString();
         }
@@ -213,26 +211,58 @@ namespace FNS_rebuild
             byte[] message_nonce = Read_bytes_from_chars(input, ref index, Round_coefficient_cipher.Message_nonce_bytes);
             StringBuilder output = new(source_text_length);
 
-            int restored_length = 0;
-            int block_index = 0;
-            while (restored_length < source_text_length)
+            int block_count = Calculate_block_count(source_text_length, block_plain_text_length);
+            int[] encrypted_block_offsets = new int[block_count];
+            int[] encrypted_block_lengths = new int[block_count];
+            int encrypted_offset = index;
+
+            for (int block_index = 0; block_index < block_count; block_index++)
             {
-                int current_block_length = block_plain_text_length;
-                int remaining = source_text_length - restored_length;
-                if (current_block_length > remaining)
-                    current_block_length = remaining;
-
+                int current_block_length = Get_plain_block_length(source_text_length, block_plain_text_length, block_index);
                 int encrypted_block_length = Get_ciphertext_length_for_source_length(current_block_length);
-                string block_encrypted = input.Substring(index, encrypted_block_length);
-                string block_source = Decrypt_single_block(block_encrypted, options, message_nonce, block_index);
-                output.Append(block_source);
-
-                index += encrypted_block_length;
-                restored_length += current_block_length;
-                block_index++;
+                encrypted_block_offsets[block_index] = encrypted_offset;
+                encrypted_block_lengths[block_index] = encrypted_block_length;
+                encrypted_offset += encrypted_block_length;
             }
 
+            if (encrypted_offset != input.Length)
+                throw new InvalidOperationException("Шифротекст содержит лишние данные или обрезан относительно блочной структуры.");
+
+            string[] decrypted_blocks = new string[block_count];
+            Parallel.For(0, block_count, block_index =>
+            {
+                string block_encrypted = input.Substring(encrypted_block_offsets[block_index], encrypted_block_lengths[block_index]);
+                decrypted_blocks[block_index] = Decrypt_single_block(block_encrypted, options, message_nonce, block_index);
+            });
+
+            for (int block_index = 0; block_index < decrypted_blocks.Length; block_index++)
+                output.Append(decrypted_blocks[block_index]);
+
             return output.ToString();
+        }
+
+        static int Calculate_block_count(int source_text_length, int block_plain_text_length)
+        {
+            if (source_text_length <= 0)
+                return 0;
+
+            if (block_plain_text_length <= 0)
+                throw new InvalidOperationException("Длина открытого блока должна быть положительной.");
+
+            return (source_text_length + block_plain_text_length - 1) / block_plain_text_length;
+        }
+
+        static int Get_plain_block_length(int source_text_length, int block_plain_text_length, int block_index)
+        {
+            int offset = block_index * block_plain_text_length;
+            int remaining = source_text_length - offset;
+            if (remaining <= 0)
+                return 0;
+
+            if (remaining < block_plain_text_length)
+                return remaining;
+
+            return block_plain_text_length;
         }
 
         static string Serialize_factorial(Digit[] factorial_coefficients, int source_text_length)

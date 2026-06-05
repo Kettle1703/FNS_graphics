@@ -21,13 +21,15 @@ namespace FNS_rebuild
         const string Sbox_stream_label = "FNS_ROUND_SBOX_STREAM_V1";
 
         static readonly Dictionary<string, byte[]> key_to_bytes = [];
+        static readonly object key_cache_sync = new();
         static readonly byte[] s_box = Build_s_box();
         static readonly byte[] inverse_s_box = Build_inverse_s_box(s_box);
 
         internal static void Clear_key_cache()
         {
             // Очищает кэш преобразованных ключей при пересборке алфавита.
-            key_to_bytes.Clear();
+            lock (key_cache_sync)
+                key_to_bytes.Clear();
         }
 
         internal static byte[] Create_message_nonce()
@@ -239,15 +241,18 @@ namespace FNS_rebuild
             if (string.IsNullOrEmpty(key))
                 return [];
 
-            if (key_to_bytes.TryGetValue(key, out byte[]? cached) && cached is not null)
-                return cached;
+            lock (key_cache_sync)
+            {
+                if (key_to_bytes.TryGetValue(key, out byte[]? cached) && cached is not null)
+                    return cached;
 
-            byte[] result = new byte[key.Length];
-            for (int i = 0; i < key.Length; i++)
-                result[i] = (byte)Factorial_encoding.char_to_number[key[i]];
+                byte[] result = new byte[key.Length];
+                for (int i = 0; i < key.Length; i++)
+                    result[i] = (byte)Factorial_encoding.char_to_number[key[i]];
 
-            key_to_bytes[key] = result;
-            return result;
+                key_to_bytes[key] = result;
+                return result;
+            }
         }
 
         static int[] Build_round_permutation(byte[] key_bytes, byte[] message_nonce, int block_index, int round_index, int length)

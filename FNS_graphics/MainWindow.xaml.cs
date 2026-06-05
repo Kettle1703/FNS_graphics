@@ -28,9 +28,6 @@ namespace FNS_graphics
             nameof(DecryptCommand),
             typeof(MainWindow));
 
-        private static readonly string ReceiverPrivateKeyPath = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_private.pk8.b64");
-        private static readonly string ReceiverPublicKeyPath = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_public.spki.b64");
-
         private static readonly JsonSerializerOptions TransferJsonSerializerOptions = new()
         {
             WriteIndented = true
@@ -45,8 +42,8 @@ namespace FNS_graphics
 
         private Strategy_wrapper? _wrapper;
         private Hybrid_fns_cryptosystem? _hybrid;
-        private readonly ECDiffieHellman _receiverPrivateKey;
-        private readonly byte[] _receiverPublicKeySpki;
+        private ECDiffieHellman _receiverPrivateKey;
+        private byte[] _receiverPublicKeySpki;
         private readonly List<TextBox> _highlightedTextBoxes = [];
         private Hybrid_sender_context? _manualSenderContext;
         private Hybrid_cipher_package? _lastEncryptedPacket;
@@ -64,7 +61,7 @@ namespace FNS_graphics
             InitializeComponent();
             Load_ui_toggle_snapshot_into_controls();
 
-            _receiverPrivateKey = Receiver_key_store.LoadOrCreate(ReceiverPrivateKeyPath, ReceiverPublicKeyPath);
+            _receiverPrivateKey = Receiver_key_store.LoadOrCreateDefault();
             _receiverPublicKeySpki = _receiverPrivateKey.ExportSubjectPublicKeyInfo();
 
             SharedSenderPublicKeyTextBox.Text = AutoPlaceholder;
@@ -74,8 +71,8 @@ namespace FNS_graphics
             SharedSessionKeyTextBox.Text = AutoPlaceholder;
             TransferCipherTextTextBox.Text = string.Empty;
 
-            EncryptMetricsTextBlock.Text = "Время: - | Длина: -";
-            DecryptMetricsTextBlock.Text = "Время: - | Длина: -";
+            EncryptMetricsTextBlock.Text = "Ядро: - | Обёртка: - | Длина: -";
+            DecryptMetricsTextBlock.Text = "Ядро: - | Обёртка: - | Длина: -";
             StatusTextBlock.Text = "Подготовка словарей шифрования...";
             SetCryptographyActionsEnabled(false);
             Digital_signature_settings initial_signature_settings = Digital_signature_store.Get_settings_snapshot();
@@ -174,7 +171,16 @@ namespace FNS_graphics
             Load_ui_toggle_snapshot_into_controls();
             bool auto_sender_mode_changed = IsAutoSenderKeyGenerationEnabled() != previous_auto_sender_mode;
             Apply_auto_sender_key_generation_mode(show_status_message: auto_sender_mode_changed);
+            ReloadReceiverKey();
             _ = Try_apply_active_recipient_link_to_main_form(report_validation_error: false);
+        }
+
+        private void ReloadReceiverKey()
+        {
+            ECDiffieHellman previous_key = _receiverPrivateKey;
+            _receiverPrivateKey = Receiver_key_store.LoadOrCreateDefault();
+            _receiverPublicKeySpki = _receiverPrivateKey.ExportSubjectPublicKeyInfo();
+            previous_key.Dispose();
         }
 
         private void DigitalSignatureSettingsButton_Click(object sender, RoutedEventArgs e)
@@ -236,6 +242,7 @@ namespace FNS_graphics
             _lastPacketLoadedFromJsonFile = true;
             _lastPacketRecoveredFromReedSolomon = loaded_from_reed_solomon_packet;
             TransferCipherTextTextBox.Text = packet.Ciphertext;
+            DecryptMetricsTextBlock.Text = Build_length_metrics_text(packet.Ciphertext.Length);
             SharedSenderPublicKeyTextBox.Text = packet.Ephemeral_public_key;
             SharedSenderPublicKeySignatureTextBox.Text = packet.Ephemeral_public_key_signature;
             SharedSessionKeyTextBox.Text = packet.Encrypted_symmetric_key;
@@ -289,6 +296,7 @@ namespace FNS_graphics
                     _receiverPublicKeySpki,
                     DefaultBlockLength,
                     IsRoundCipherEnabled(),
+                    GetSelectedEncryptionCore(),
                     AutoPlaceholder,
                     out Encrypt_request request,
                     out string validation_error))
@@ -303,12 +311,14 @@ namespace FNS_graphics
                     ? null
                     : GetOrCreateManualSenderContext();
 
-                Stopwatch watch = Stopwatch.StartNew();
+                Crypto_operation_timing timing = new();
+                timing.Start_wrapper();
                 Hybrid_cipher_package packet = _hybrid!.Encrypt(
                     request.Source_text,
                     request.Receiver_public_spki,
                     request.Options,
-                    senderContext);
+                    senderContext,
+                    timing);
 
                 Digital_signature_settings signature_settings = Digital_signature_store.Get_settings_snapshot();
                 ApplySignatureControlsState(signature_settings.Sign_ciphertext);
@@ -342,7 +352,22 @@ namespace FNS_graphics
                     packet.Ephemeral_public_key_signature = string.Empty;
                 }
 
-                watch.Stop();
+                bool build_json_file = IsBuildJsonFileEnabled();
+                bool apply_reed_solomon = false;
+                bool json_export_success = false;
+                string json_file_path = string.Empty;
+                string json_export_error = string.Empty;
+                if (build_json_file)
+                {
+                    apply_reed_solomon = IsReedSolomonEnabledForJson();
+                    json_export_success = Try_export_transfer_json(
+                        packet,
+                        apply_reed_solomon,
+                        out json_file_path,
+                        out json_export_error);
+                }
+
+                timing.Stop_wrapper();
 
                 _lastEncryptedPacket = Clone_packet(packet);
                 _lastPacketLoadedFromJsonFile = false;
@@ -352,7 +377,8 @@ namespace FNS_graphics
                 SharedSenderPublicKeySignatureTextBox.Text = packet.Ephemeral_public_key_signature;
                 SharedSessionKeyTextBox.Text = packet.Encrypted_symmetric_key;
 
-                EncryptMetricsTextBlock.Text = $"Время: {watch.Elapsed.TotalMilliseconds:F2} мс | Длина: {request.Source_text.Length}";
+                EncryptMetricsTextBlock.Text = Build_operation_metrics_text(timing, request.Source_text.Length);
+                DecryptMetricsTextBlock.Text = Build_length_metrics_text(packet.Ciphertext.Length);
                 if (signature_settings.Sign_ciphertext)
                 {
                     MarkPersistentHighlights(
@@ -376,18 +402,17 @@ namespace FNS_graphics
                         ? "Шифрование выполнено. Пакет подписан долгосрочным ключом отправителя."
                         : "Шифрование выполнено. Данные для передачи заполнены в общем блоке.");
 
-                    if (!IsBuildJsonFileEnabled())
+                    if (!build_json_file)
                         return;
 
-                    bool apply_reed_solomon = IsReedSolomonEnabledForJson();
-                    if (Try_export_transfer_json(packet, apply_reed_solomon, out string file_path, out string export_error))
+                    if (json_export_success)
                     {
-                        status.AppendLine($"Расположение созданного файла: {file_path}");
+                        status.AppendLine($"Расположение созданного файла: {json_file_path}");
                         status.AppendLine(Build_reed_solomon_encode_status_line(apply_reed_solomon));
                     }
                     else
                     {
-                        status.AppendLine($"JSON файл не создан: {export_error}");
+                        status.AppendLine($"JSON файл не создан: {json_export_error}");
                         status.AppendLine("Код Рида-Соломона: не наложен, так как JSON-файл передачи не создан.");
                     }
                 });
@@ -419,6 +444,7 @@ namespace FNS_graphics
                     SharedSenderPublicKeySignatureTextBox.Text,
                     DefaultBlockLength,
                     IsRoundCipherEnabled(),
+                    GetSelectedEncryptionCore(),
                     AutoPlaceholder,
                     out Hybrid_cipher_package packet,
                     out string validation_error))
@@ -430,6 +456,8 @@ namespace FNS_graphics
 
             try
             {
+                Crypto_operation_timing timing = new();
+                timing.Start_wrapper();
                 Attach_signature_from_last_packet_if_same_payload(packet);
                 string matched_recipient_name = string.Empty;
 
@@ -459,12 +487,12 @@ namespace FNS_graphics
                     _ = Try_apply_active_recipient_link_to_main_form(report_validation_error: false);
                 }
 
-                Stopwatch watch = Stopwatch.StartNew();
-                string decrypted = _hybrid!.Decrypt(packet, _receiverPrivateKey);
-                watch.Stop();
+                string decrypted = _hybrid!.Decrypt(packet, _receiverPrivateKey, timing);
+                timing.Stop_wrapper();
 
                 SourceTextBox.Text = decrypted;
-                DecryptMetricsTextBlock.Text = $"Время: {watch.Elapsed.TotalMilliseconds:F2} мс | Длина: {packet.Ciphertext.Length}";
+                EncryptMetricsTextBlock.Text = Build_length_metrics_text(decrypted.Length);
+                DecryptMetricsTextBlock.Text = Build_operation_metrics_text(timing, packet.Ciphertext.Length);
                 MarkPersistentHighlights(SourceTextBox);
                 StatusTextBlock.Text = Build_status_text(status =>
                 {
@@ -678,6 +706,18 @@ namespace FNS_graphics
                 : "Код Рида-Соломона: во входном JSON не обнаружен (загружена полезная нагрузка без внешнего RS-пакета).";
         }
 
+        private static string Build_operation_metrics_text(Crypto_operation_timing timing, int length)
+        {
+            return $"Ядро: {timing.Core_elapsed.TotalMilliseconds:F2} мс | " +
+                   $"Обёртка: {timing.Wrapper_elapsed.TotalMilliseconds:F2} мс | " +
+                   $"Длина: {length}";
+        }
+
+        private static string Build_length_metrics_text(int length)
+        {
+            return $"Ядро: - | Обёртка: - | Длина: {length}";
+        }
+
         private static string Build_status_text(Action<StringBuilder> compose_status)
         {
             StringBuilder status = new();
@@ -780,6 +820,7 @@ namespace FNS_graphics
                 packet.Sender_signing_key_fingerprint = _lastEncryptedPacket.Sender_signing_key_fingerprint;
 
             packet.Round_cipher_enabled = _lastEncryptedPacket.Round_cipher_enabled;
+            packet.Encryption_core = _lastEncryptedPacket.Encryption_core;
         }
 
         private static Hybrid_cipher_package Clone_packet(Hybrid_cipher_package source)
@@ -793,6 +834,7 @@ namespace FNS_graphics
                 Sender_signing_key_fingerprint = source.Sender_signing_key_fingerprint,
                 Block_plain_text_length = source.Block_plain_text_length,
                 Round_cipher_enabled = source.Round_cipher_enabled,
+                Encryption_core = source.Encryption_core,
                 Curve_id = source.Curve_id
             };
         }
@@ -907,6 +949,7 @@ namespace FNS_graphics
                 Encrypted_symmetric_key = encrypted_symmetric_key,
                 Block_plain_text_length = DefaultBlockLength,
                 Round_cipher_enabled = payload.Round_cipher_enabled,
+                Encryption_core = Encryption_core_catalog.From_storage_id(payload.Encryption_core),
                 Curve_id = Hybrid_fns_cryptosystem.Curve_id_nist_p256
             };
             return true;
@@ -1006,6 +1049,7 @@ namespace FNS_graphics
                     Sender_signing_key_fingerprint = packet.Sender_signing_key_fingerprint,
                     Encrypted_symmetric_key = packet.Encrypted_symmetric_key,
                     Round_cipher_enabled = packet.Round_cipher_enabled,
+                    Encryption_core = Encryption_core_catalog.To_storage_id(packet.Encryption_core),
                     Ciphertext = packet.Ciphertext
                 };
 
@@ -1054,6 +1098,11 @@ namespace FNS_graphics
             return Ui_toggle_store.Get_snapshot().Json_transfer_directory_path;
         }
 
+        private static Encryption_core_kind GetSelectedEncryptionCore()
+        {
+            return Ui_toggle_store.Get_snapshot().Encryption_core;
+        }
+
         private sealed class Transfer_json_package
         {
             [JsonPropertyOrder(1)]
@@ -1072,6 +1121,9 @@ namespace FNS_graphics
             public bool Round_cipher_enabled { get; set; } = true;
 
             [JsonPropertyOrder(6)]
+            public string Encryption_core { get; set; } = Encryption_core_catalog.Factorial_id;
+
+            [JsonPropertyOrder(7)]
             public string Ciphertext { get; set; } = string.Empty;
         }
 

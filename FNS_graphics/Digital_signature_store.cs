@@ -40,12 +40,11 @@ namespace FNS_graphics
     {
         static readonly object Sync_root = new();
 
-        static readonly string Storage_directory_path = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "FNS_graphics",
-            "crypto");
+        const string Settings_file_name = "digital_signature_settings.json";
 
-        static readonly string Settings_path = Path.Combine(Storage_directory_path, "digital_signature_settings.json");
+        static readonly string Storage_directory_path = App_storage_paths.Crypto_directory_path;
+
+        static readonly string Settings_path = Path.Combine(Storage_directory_path, Settings_file_name);
 
         static readonly JsonSerializerOptions Json_options = new()
         {
@@ -128,11 +127,7 @@ namespace FNS_graphics
                     normalized_name = Build_random_recipient_name();
 
                 string unique_name = Ensure_unique_recipient_name(normalized_name, existing_names);
-                Sender_signing_key_entry sender_signing = Generate_new_signing_key_pair_entry();
-                string trusted_sender_signing_public_key = sender_signing.Public_key;
-                string receiver_hybrid_public_key = Try_get_local_receiver_public_key_spki_base64(out string local_receiver_public_key)
-                    ? local_receiver_public_key
-                    : Generate_receiver_hybrid_public_key_spki_base64();
+                Sender_signing_key_entry sender_signing = Generate_sender_signing_key_pair_entry();
 
                 return new Recipient_key_link_entry
                 {
@@ -140,22 +135,10 @@ namespace FNS_graphics
                     Recipient_name = unique_name,
                     Sender_signing_private_key_pkcs8 = sender_signing.Private_key_pkcs8,
                     Sender_signing_public_key_spki = sender_signing.Public_key,
-                    Trusted_sender_signing_public_key = trusted_sender_signing_public_key,
-                    Receiver_hybrid_public_key = receiver_hybrid_public_key
+                    Trusted_sender_signing_public_key = string.Empty,
+                    Receiver_hybrid_public_key = string.Empty
                 };
             }
-        }
-
-        internal static string Generate_sender_signing_public_key_spki_base64()
-        {
-            using ECDsa signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            return Base64_url_codec.Encode(signer.ExportSubjectPublicKeyInfo());
-        }
-
-        internal static string Generate_receiver_hybrid_public_key_spki_base64()
-        {
-            using ECDiffieHellman receiver = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            return Base64_url_codec.Encode(receiver.ExportSubjectPublicKeyInfo());
         }
 
         internal static bool Try_get_sender_signing_public_key_from_private(
@@ -416,6 +399,7 @@ namespace FNS_graphics
             string normalized_ephemeral_key = Normalize_base64_text(packet.Ephemeral_public_key);
             string normalized_encrypted_symmetric_key = Normalize_base64_text(packet.Encrypted_symmetric_key);
             string normalized_sender_signing_key_fingerprint = Normalize_key_fingerprint(packet.Sender_signing_key_fingerprint);
+            string encryption_core = Encryption_core_catalog.To_storage_id(packet.Encryption_core);
 
             if (!Try_decode_base64(normalized_ephemeral_key, out _))
             {
@@ -439,10 +423,11 @@ namespace FNS_graphics
             using MemoryStream stream = new();
             using (BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true))
             {
-                Write_utf8_field(writer, "FNS_GRAPHICS_PACKET_SIGNATURE_V3");
+                Write_utf8_field(writer, "FNS_GRAPHICS_PACKET_SIGNATURE_V4");
                 writer.Write(packet.Curve_id);
                 writer.Write(packet.Block_plain_text_length);
                 writer.Write(packet.Round_cipher_enabled);
+                Write_utf8_field(writer, encryption_core);
                 Write_utf8_field(writer, ciphertext);
                 Write_utf8_field(writer, normalized_encrypted_symmetric_key);
                 Write_utf8_field(writer, normalized_ephemeral_key);
@@ -842,7 +827,7 @@ namespace FNS_graphics
             return $"Получатель_{new string(digits)}";
         }
 
-        static Sender_signing_key_entry Generate_new_signing_key_pair_entry()
+        internal static Sender_signing_key_entry Generate_sender_signing_key_pair_entry()
         {
             using ECDsa signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
             return new Sender_signing_key_entry
@@ -881,28 +866,6 @@ namespace FNS_graphics
                 using ECDiffieHellman ecdh = ECDiffieHellman.Create();
                 ecdh.ImportSubjectPublicKeyInfo(key_bytes, out int read);
                 return read == key_bytes.Length;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        static bool Try_get_local_receiver_public_key_spki_base64(out string receiver_public_key_spki_base64)
-        {
-            receiver_public_key_spki_base64 = string.Empty;
-
-            try
-            {
-                string receiver_private_key_path = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_private.pk8.b64");
-                string receiver_public_key_path = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_public.spki.b64");
-
-                using ECDiffieHellman receiver_private_key = Receiver_key_store.LoadOrCreate(
-                    receiver_private_key_path,
-                    receiver_public_key_path);
-
-                receiver_public_key_spki_base64 = Base64_url_codec.Encode(receiver_private_key.ExportSubjectPublicKeyInfo());
-                return true;
             }
             catch
             {
@@ -955,8 +918,7 @@ namespace FNS_graphics
 
         static void Ensure_storage_directory_exists()
         {
-            if (!Directory.Exists(Storage_directory_path))
-                Directory.CreateDirectory(Storage_directory_path);
+            App_storage_paths.Ensure_crypto_directory_exists();
         }
     }
 }

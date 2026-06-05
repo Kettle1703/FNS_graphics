@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
 using FNS_rebuild;
@@ -10,9 +8,6 @@ namespace FNS_graphics
 {
     public partial class DigitalSignatureSettingsWindow : Window
     {
-        static readonly string Receiver_private_key_path = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_private.pk8.b64");
-        static readonly string Receiver_public_key_path = Path.Combine(AppContext.BaseDirectory, "receiver_ecdh_public.spki.b64");
-
         bool settings_loaded_from_store;
         string active_recipient_runtime_key = string.Empty;
 
@@ -38,7 +33,6 @@ namespace FNS_graphics
             if (active_recipient_runtime_key.Length == 0 && recipient_links.Count > 0)
                 active_recipient_runtime_key = recipient_links[0].Runtime_key;
 
-            GeneratedKeyTextBox.Text = string.Empty;
             Refresh_recipient_links_list();
             settings_loaded_from_store = true;
         }
@@ -47,6 +41,8 @@ namespace FNS_graphics
         {
             if (!settings_loaded_from_store)
                 return;
+
+            Save_own_receiver_public_key_if_possible();
 
             List<Recipient_key_link_entry> links_to_save = [];
             foreach (Recipient_link_view_item view in recipient_links)
@@ -103,7 +99,7 @@ namespace FNS_graphics
             Refresh_recipient_links_list();
         }
 
-        void RegenerateRecipientLinkButton_Click(object sender, RoutedEventArgs e)
+        void GenerateRecipientSigningKeyButton_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not Button { Tag: string runtime_key })
                 return;
@@ -116,8 +112,6 @@ namespace FNS_graphics
             Recipient_key_link_entry regenerated = Digital_signature_store.Generate_recipient_key_link_entry(target.Recipient_name);
             target.Sender_signing_private_key_pkcs8 = regenerated.Sender_signing_private_key_pkcs8;
             target.Sender_signing_public_key_spki = regenerated.Sender_signing_public_key_spki;
-            target.Trusted_sender_signing_public_key = regenerated.Trusted_sender_signing_public_key;
-            target.Receiver_hybrid_public_key = regenerated.Receiver_hybrid_public_key;
 
             Refresh_recipient_links_list();
         }
@@ -136,14 +130,19 @@ namespace FNS_graphics
             Refresh_recipient_links_list();
         }
 
-        void GenerateSenderSigningPublicKeyButton_Click(object sender, RoutedEventArgs e)
+        void GenerateReceiverHybridKeyButton_Click(object sender, RoutedEventArgs e)
         {
-            GeneratedKeyTextBox.Text = Digital_signature_store.Generate_sender_signing_public_key_spki_base64();
-        }
+            MessageBoxResult result = MessageBox.Show(
+                this,
+                "Будет создана новая ECDH-пара получателя. Старый публичный ключ, который уже был передан собеседнику, перестанет подходить для новых входящих пакетов.",
+                "Новый ключ ECDH",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
 
-        void GenerateReceiverHybridPublicKeyButton_Click(object sender, RoutedEventArgs e)
-        {
-            GeneratedKeyTextBox.Text = Digital_signature_store.Generate_receiver_hybrid_public_key_spki_base64();
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            OwnReceiverPublicKeyTextBox.Text = Receiver_key_store.RegenerateDefault();
         }
 
         void Refresh_recipient_links_list()
@@ -197,16 +196,42 @@ namespace FNS_graphics
         {
             try
             {
-                using ECDiffieHellman receiver_private = Receiver_key_store.LoadOrCreate(
-                    Receiver_private_key_path,
-                    Receiver_public_key_path);
-
-                OwnReceiverPublicKeyTextBox.Text = Base64_url_codec.Encode(receiver_private.ExportSubjectPublicKeyInfo());
+                OwnReceiverPublicKeyTextBox.Text = Receiver_key_store.LoadOrCreateDefaultPublicKeyBase64();
             }
             catch
             {
                 OwnReceiverPublicKeyTextBox.Text = "<не удалось загрузить ключ>";
             }
+        }
+
+        void Save_own_receiver_public_key_if_possible()
+        {
+            string input_public_key = Normalize_base64_text(OwnReceiverPublicKeyTextBox.Text);
+            if (input_public_key.Length == 0 || input_public_key.StartsWith("<", StringComparison.Ordinal))
+                return;
+
+            string actual_public_key;
+            try
+            {
+                actual_public_key = Receiver_key_store.LoadOrCreateDefaultPublicKeyBase64();
+            }
+            catch
+            {
+                return;
+            }
+
+            if (string.Equals(input_public_key, actual_public_key, StringComparison.Ordinal))
+                return;
+
+            if (Receiver_key_store.Try_save_default_public_key_if_matches_private(input_public_key, out _))
+                return;
+
+            MessageBox.Show(
+                this,
+                "Публичный ключ получателя ECDH не сохранён: он не соответствует локальному приватному ключу. Для смены вашей ECDH-пары используйте кнопку «Сменить мои приватные ключи».",
+                "Публичный ключ ECDH не сохранён",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
 
         Recipient_link_view_item? Find_recipient_link_by_runtime_key(string runtime_key)

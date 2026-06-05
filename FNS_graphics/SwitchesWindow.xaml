@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Переключатели режимов"
-        Height="540"
+        Height="600"
         Width="780"
 
         Loaded="Window_Loaded"
@@ -63,6 +63,17 @@
             <Setter Property="HorizontalScrollBarVisibility" Value="Hidden" />
         </Style>
 
+        <Style TargetType="ComboBox">
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="BorderBrush" Value="#FFB6CCB8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background" Value="#FFFFFFFF" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
         <Style x:Key="SoftToggleContainerStyle" TargetType="Border">
             <Setter Property="Background" Value="#FFE2ECE3" />
             <Setter Property="BorderBrush" Value="#FF9FB9A3" />
@@ -87,6 +98,19 @@
     <Grid Margin="6">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}">
+                            Ядро шифрования
+                        </TextBlock>
+                        <ComboBox x:Name="EncryptionCoreComboBox">
+                            <ComboBoxItem Content="Факториальная система счисления" />
+                            <ComboBoxItem Content="Кузнечик-CBC (ГОСТ Р 34.12-2015 / ГОСТ Р 34.13-2015)" />
+                            <ComboBoxItem Content="AES-GCM-256" />
+                        </ComboBox>
+                    </StackPanel>
+                </Border>
+
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource SectionTitleStyle}">

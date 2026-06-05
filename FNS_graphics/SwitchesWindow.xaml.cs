@@ -1,5 +1,6 @@
 using System;
 using System.Windows;
+using FNS_rebuild;
 
 namespace FNS_graphics
 {
@@ -14,7 +15,15 @@ namespace FNS_graphics
 
         void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            Apply_screen_height();
+
             Ui_toggle_settings ui_toggle_settings = Ui_toggle_store.Get_snapshot();
+            EncryptionCoreComboBox.SelectedIndex = ui_toggle_settings.Encryption_core switch
+            {
+                Encryption_core_kind.KuznyechikCbc => 1,
+                Encryption_core_kind.AesGcm => 2,
+                _ => 0
+            };
             BuildJsonFileCheckBox.IsChecked = ui_toggle_settings.Build_json_file;
             ApplyReedSolomonForJsonCheckBox.IsChecked = ui_toggle_settings.Apply_reed_solomon_for_json;
             JsonTransferDirectoryTextBox.Text = ui_toggle_settings.Json_transfer_directory_path;
@@ -26,6 +35,19 @@ namespace FNS_graphics
 
             Apply_json_file_dependent_controls_state();
             loaded = true;
+        }
+
+        void Apply_screen_height()
+        {
+            Rect work_area = SystemParameters.WorkArea;
+            double target_height = Math.Max(480, work_area.Height);
+
+            MaxHeight = target_height;
+            Height = target_height;
+            Top = work_area.Top;
+
+            if (Left + Width > work_area.Right)
+                Left = Math.Max(work_area.Left, work_area.Right - Width);
         }
 
         void BuildJsonFileCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -44,7 +66,13 @@ namespace FNS_graphics
                 Apply_reed_solomon_for_json = ApplyReedSolomonForJsonCheckBox.IsChecked == true,
                 Json_transfer_directory_path = JsonTransferDirectoryTextBox.Text,
                 Auto_sender_key_generation = AutoSenderKeyGenerationCheckBox.IsChecked != false,
-                Enable_round_cipher = EnableRoundCipherCheckBox.IsChecked != false
+                Enable_round_cipher = EnableRoundCipherCheckBox.IsChecked != false,
+                Encryption_core = EncryptionCoreComboBox.SelectedIndex switch
+                {
+                    1 => Encryption_core_kind.KuznyechikCbc,
+                    2 => Encryption_core_kind.AesGcm,
+                    _ => Encryption_core_kind.Factorial
+                }
             });
 
             Digital_signature_settings signature_settings = Digital_signature_store.Get_settings_snapshot();

@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="EPPlus" Version="7.2.0" />
+    <PackageReference Include="OpenGost.Security.Cryptography" Version="0.3.0" />
     <PackageReference Include="ReedSolomon" Version="2.0.0" />
     <PackageReference Include="System.IO.Hashing" Version="8.0.0" />
     <PackageReference Include="System.Runtime.Numerics" Version="4.3.0" />
