@@ -397,7 +397,7 @@ namespace FNS_graphics
 
             string ciphertext = packet.Ciphertext ?? string.Empty;
             string normalized_ephemeral_key = Normalize_base64_text(packet.Ephemeral_public_key);
-            string normalized_encrypted_symmetric_key = Normalize_base64_text(packet.Encrypted_symmetric_key);
+            string normalized_key_derivation_salt = Normalize_base64_text(packet.Key_derivation_salt);
             string normalized_sender_signing_key_fingerprint = Normalize_key_fingerprint(packet.Sender_signing_key_fingerprint);
             string encryption_core = Encryption_core_catalog.To_storage_id(packet.Encryption_core);
 
@@ -407,7 +407,7 @@ namespace FNS_graphics
                 return false;
             }
 
-            if (!Try_decode_base64(normalized_encrypted_symmetric_key, out _))
+            if (!Try_decode_base64(normalized_key_derivation_salt, out _))
             {
                 error_message = "Поле публичной соли для восстановления симметричного ключа в пакете некорректно: ожидается Base64-строка.";
                 return false;
@@ -429,7 +429,7 @@ namespace FNS_graphics
                 writer.Write(packet.Round_cipher_enabled);
                 Write_utf8_field(writer, encryption_core);
                 Write_utf8_field(writer, ciphertext);
-                Write_utf8_field(writer, normalized_encrypted_symmetric_key);
+                Write_utf8_field(writer, normalized_key_derivation_salt);
                 Write_utf8_field(writer, normalized_ephemeral_key);
                 Write_utf8_field(writer, normalized_sender_signing_key_fingerprint);
                 writer.Flush();

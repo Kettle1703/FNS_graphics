@@ -1,4 +1,4 @@
-﻿<Window x:Class="FNS_graphics.MainWindow"
+<Window x:Class="FNS_graphics.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -195,7 +195,7 @@
                         <TextBox x:Name="SharedReceiverPublicKeyFingerprintTextBox" IsReadOnly="True" Margin="0,0,0,8" />
 
                         <TextBlock>Публичная соль для восстановления симметричного ключа</TextBlock>
-                        <TextBox x:Name="SharedSessionKeyTextBox" IsReadOnly="True" Margin="0,0,0,8" />
+                        <TextBox x:Name="SharedKeyDerivationSaltTextBox" IsReadOnly="True" Margin="0,0,0,8" />
 
                     </StackPanel>
                 </Border>

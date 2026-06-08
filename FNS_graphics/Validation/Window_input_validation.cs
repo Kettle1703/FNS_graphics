@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using FNS_rebuild;
 
 namespace FNS_graphics
@@ -68,7 +68,7 @@ namespace FNS_graphics
         internal static bool TryBuildDecryptPacket(
             string? ciphertext_text,
             string? sender_public_key_text,
-            string? encrypted_symmetric_key_text,
+            string? key_derivation_salt_text,
             string? sender_public_key_signature_text,
             int block_plain_text_length,
             bool enable_round_cipher,
@@ -80,7 +80,7 @@ namespace FNS_graphics
             // Проверяет и собирает пакет для дешифрования.
             string ciphertext = ciphertext_text ?? string.Empty;
             string sender_public_key = Base64_url_codec.Canonicalize_if_possible(sender_public_key_text);
-            string encrypted_symmetric_key = Base64_url_codec.Canonicalize_if_possible(encrypted_symmetric_key_text);
+            string key_derivation_salt = Base64_url_codec.Canonicalize_if_possible(key_derivation_salt_text);
             string sender_public_key_signature = Base64_url_codec.Canonicalize_if_possible(sender_public_key_signature_text);
 
             if (string.IsNullOrWhiteSpace(ciphertext) || ciphertext.StartsWith("<", StringComparison.Ordinal))
@@ -97,7 +97,7 @@ namespace FNS_graphics
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(encrypted_symmetric_key) || encrypted_symmetric_key == auto_placeholder)
+            if (string.IsNullOrWhiteSpace(key_derivation_salt) || key_derivation_salt == auto_placeholder)
             {
                 packet = null!;
                 error_message = "Поле публичной соли для восстановления симметричного ключа не заполнено.";
@@ -105,10 +105,10 @@ namespace FNS_graphics
             }
 
             // Валидирует Base64-поля заранее, чтобы не использовать исключения как рабочий сценарий.
-            if (!IsValidBase64(sender_public_key) || !IsValidBase64(encrypted_symmetric_key))
+            if (!IsValidBase64(sender_public_key) || !IsValidBase64(key_derivation_salt))
             {
                 packet = null!;
-                error_message = "Поля ключей пакета должны быть в формате Base64/Base64URL.";
+                error_message = "Поля публичного ключа отправителя и публичной соли должны быть в формате Base64/Base64URL.";
                 return false;
             }
 
@@ -123,7 +123,7 @@ namespace FNS_graphics
             {
                 Ciphertext = ciphertext,
                 Ephemeral_public_key = sender_public_key,
-                Encrypted_symmetric_key = encrypted_symmetric_key,
+                Key_derivation_salt = key_derivation_salt,
                 Ephemeral_public_key_signature = sender_public_key_signature == auto_placeholder
                     ? string.Empty
                     : sender_public_key_signature,

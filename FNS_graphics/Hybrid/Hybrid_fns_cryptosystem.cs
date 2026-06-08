@@ -13,7 +13,7 @@ namespace FNS_rebuild
         // Ciphertext:
         // ФСС-шифротекст (после раундов вашего симметричного алгоритма).
         //
-        // Encrypted_symmetric_key:
+        // Key_derivation_salt:
         // Открытый служебный материал для восстановления симметрического слоя ФСС.
         // Сейчас это HKDF salt; seed ФСС обе стороны выводят из ECDH shared secret + salt.
         //
@@ -23,7 +23,7 @@ namespace FNS_rebuild
         //
         // Ephemeral_public_key_signature:
         // Цифровая подпись всего передаваемого пакета:
-        // (Ciphertext + Encrypted_symmetric_key + Ephemeral_public_key + служебные параметры).
+        // (Ciphertext + Key_derivation_salt + Ephemeral_public_key + служебные параметры).
         // Формат: Base64, подпись ECDSA (DER), хеш SHA-256.
         //
         // Sender_signing_key_fingerprint:
@@ -36,7 +36,7 @@ namespace FNS_rebuild
         // Curve_id:
         // Идентификатор эллиптической кривой для совместимости форматов.
         public string Ciphertext { get; set; } = "";
-        public string Encrypted_symmetric_key { get; set; } = "";
+        public string Key_derivation_salt { get; set; } = "";
         public string Ephemeral_public_key { get; set; } = "";
         public string Ephemeral_public_key_signature { get; set; } = "";
         public string Sender_signing_key_fingerprint { get; set; } = "";
@@ -146,7 +146,7 @@ namespace FNS_rebuild
 
                 string ciphertext = Measure_core(timing, () => options.Encryption_core switch
                 {
-                    Encryption_core_kind.KuznyechikCbc => Encrypt_with_kuznyechik(source, fss_seed, options),
+                    Encryption_core_kind.KuznyechikCtr => Encrypt_with_kuznyechik(source, fss_seed, options),
                     Encryption_core_kind.AesGcm => Encrypt_with_aes_gcm(source, fss_seed, options),
                     _ => Encrypt_with_factorial(source, master_key, fss_seed, options)
                 });
@@ -157,7 +157,7 @@ namespace FNS_rebuild
                 return new Hybrid_cipher_package
                 {
                     Ciphertext = ciphertext,
-                    Encrypted_symmetric_key = Base64_url_codec.Encode(key_derivation_material),
+                    Key_derivation_salt = Base64_url_codec.Encode(key_derivation_material),
                     Ephemeral_public_key = Base64_url_codec.Encode(ephemeral_public_key_spki),
                     Block_plain_text_length = options.Block_plain_text_length,
                     Round_cipher_enabled = options.Enable_round_cipher,
@@ -188,8 +188,8 @@ namespace FNS_rebuild
             if (!Base64_url_codec.Try_decode(packet.Ephemeral_public_key, out byte[] ephemeral_public_key_spki))
                 throw new CryptographicException("Поле Ephemeral_public_key не является корректным Base64/Base64URL.");
 
-            if (!Base64_url_codec.Try_decode(packet.Encrypted_symmetric_key, out byte[] key_derivation_material))
-                throw new CryptographicException("Поле Encrypted_symmetric_key не является корректным Base64/Base64URL.");
+            if (!Base64_url_codec.Try_decode(packet.Key_derivation_salt, out byte[] key_derivation_material))
+                throw new CryptographicException("Поле Key_derivation_salt не является корректным Base64/Base64URL.");
 
             using ECDiffieHellman sender_ephemeral_public_holder = ECDiffieHellman.Create();
             sender_ephemeral_public_holder.ImportSubjectPublicKeyInfo(ephemeral_public_key_spki, out int read);
@@ -206,7 +206,7 @@ namespace FNS_rebuild
 
             return Measure_core(timing, () => packet.Encryption_core switch
             {
-                Encryption_core_kind.KuznyechikCbc => Decrypt_with_kuznyechik(packet, fss_seed),
+                Encryption_core_kind.KuznyechikCtr => Decrypt_with_kuznyechik(packet, fss_seed),
                 Encryption_core_kind.AesGcm => Decrypt_with_aes_gcm(packet, fss_seed),
                 _ => Decrypt_with_factorial(packet, master_key, fss_seed)
             });
@@ -259,7 +259,7 @@ namespace FNS_rebuild
                 Block_plain_text_length = 0,
                 Key = Base64_url_codec.Encode(fss_seed),
                 Enable_round_cipher = false,
-                Encryption_core = Encryption_core_kind.KuznyechikCbc
+                Encryption_core = Encryption_core_kind.KuznyechikCtr
             };
 
             return local_wrapper.Encrypt(source, effective_options);
@@ -273,7 +273,7 @@ namespace FNS_rebuild
                 Block_plain_text_length = 0,
                 Key = Base64_url_codec.Encode(fss_seed),
                 Enable_round_cipher = false,
-                Encryption_core = Encryption_core_kind.KuznyechikCbc
+                Encryption_core = Encryption_core_kind.KuznyechikCtr
             };
 
             return local_wrapper.Decrypt(packet.Ciphertext, effective_options);
@@ -338,26 +338,26 @@ namespace FNS_rebuild
 
         static byte[] Parse_key_derivation_material(byte[] input)
         {
-            // Разбор служебной структуры encrypted_symmetric_key:
+            // Разбор служебной структуры Key_derivation_salt:
             // version=2 + длина salt + salt.
             using MemoryStream memory = new(input);
             using BinaryReader reader = new(memory, Encoding.UTF8, leaveOpen: true);
 
             byte version = reader.ReadByte();
             if (version != 2)
-                throw new CryptographicException($"Неподдерживаемая версия encrypted_symmetric_key: {version}.");
+                throw new CryptographicException($"Неподдерживаемая версия Key_derivation_salt: {version}.");
 
             int salt_length = reader.ReadByte();
             if (salt_length != Kdf_salt_bytes)
-                throw new CryptographicException("Некорректная структура encrypted_symmetric_key.");
+                throw new CryptographicException("Некорректная структура Key_derivation_salt.");
 
             byte[] kdf_salt = reader.ReadBytes(salt_length);
 
             if (kdf_salt.Length != salt_length)
-                throw new CryptographicException("encrypted_symmetric_key оборван или повреждён.");
+                throw new CryptographicException("Key_derivation_salt оборван или повреждён.");
 
             if (memory.Position != memory.Length)
-                throw new CryptographicException("encrypted_symmetric_key содержит лишние данные.");
+                throw new CryptographicException("Key_derivation_salt содержит лишние данные.");
 
             return kdf_salt;
         }

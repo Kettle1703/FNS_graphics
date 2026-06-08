@@ -17,7 +17,7 @@ namespace FNS_rebuild
             options ??= Cipher_options.Default;
 
             byte[] key = Derive_key(options.Key);
-            byte[] nonce = RandomNumberGenerator.GetBytes(Nonce_bytes);
+            byte[] nonce = Build_nonce(options);
             byte[] source_bytes = Encoding.UTF8.GetBytes(input ?? string.Empty);
             byte[] ciphertext = new byte[source_bytes.Length];
             byte[] tag = new byte[Tag_bytes];
@@ -81,6 +81,24 @@ namespace FNS_rebuild
                 throw new CryptographicException("Для AES-GCM требуется ключевой материал.");
 
             return SHA256.HashData(Encoding.UTF8.GetBytes(material));
+        }
+
+        static byte[] Build_nonce(Cipher_options options)
+        {
+            if (options.Fixed_message_nonce is null)
+                return RandomNumberGenerator.GetBytes(Nonce_bytes);
+
+            if (options.Fixed_message_nonce.Length == Nonce_bytes)
+            {
+                byte[] nonce = new byte[Nonce_bytes];
+                Array.Copy(options.Fixed_message_nonce, nonce, nonce.Length);
+                return nonce;
+            }
+
+            byte[] expanded = SHA256.HashData(options.Fixed_message_nonce);
+            byte[] result = new byte[Nonce_bytes];
+            Array.Copy(expanded, result, result.Length);
+            return result;
         }
     }
 }

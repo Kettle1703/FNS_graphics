@@ -17,9 +17,9 @@ namespace FNS_rebuild
             options ??= Cipher_options.Default;
 
             byte[] key = Derive_key(options.Key);
-            byte[] iv = RandomNumberGenerator.GetBytes(Iv_bytes);
+            byte[] iv = Build_iv(options);
             byte[] source_bytes = Encoding.UTF8.GetBytes(input ?? string.Empty);
-            byte[] encrypted = Transform(source_bytes, key, iv, encrypt: true);
+            byte[] encrypted = Transform_ctr(source_bytes, key, iv);
 
             using MemoryStream packet = new();
             packet.WriteByte(Packet_version);
@@ -56,7 +56,7 @@ namespace FNS_rebuild
             Array.Copy(packet, 2 + iv_length, ciphertext, 0, ciphertext_length);
 
             byte[] key = Derive_key(options.Key);
-            byte[] decrypted = Transform(ciphertext, key, iv, encrypt: false);
+            byte[] decrypted = Transform_ctr(ciphertext, key, iv);
             return Encoding.UTF8.GetString(decrypted);
         }
 
@@ -69,19 +69,66 @@ namespace FNS_rebuild
             return SHA256.HashData(Encoding.UTF8.GetBytes(material));
         }
 
-        static byte[] Transform(byte[] input, byte[] key, byte[] iv, bool encrypt)
+        static byte[] Build_iv(Cipher_options options)
         {
+            if (options.Fixed_message_nonce is null)
+                return RandomNumberGenerator.GetBytes(Iv_bytes);
+
+            if (options.Fixed_message_nonce.Length == Iv_bytes)
+            {
+                byte[] iv = new byte[Iv_bytes];
+                Array.Copy(options.Fixed_message_nonce, iv, iv.Length);
+                return iv;
+            }
+
+            byte[] expanded = SHA256.HashData(options.Fixed_message_nonce);
+            byte[] result = new byte[Iv_bytes];
+            Array.Copy(expanded, result, result.Length);
+            return result;
+        }
+
+        static byte[] Transform_ctr(byte[] input, byte[] key, byte[] iv)
+        {
+            if (input.Length == 0)
+                return [];
+
             using Grasshopper algorithm = Grasshopper.Create();
-            algorithm.Mode = CipherMode.CBC;
-            algorithm.Padding = PaddingMode.PKCS7;
+            algorithm.Mode = CipherMode.ECB;
+            algorithm.Padding = PaddingMode.None;
             algorithm.KeySize = Key_bytes * 8;
             algorithm.BlockSize = Iv_bytes * 8;
 
-            using ICryptoTransform transform = encrypt
-                ? algorithm.CreateEncryptor(key, iv)
-                : algorithm.CreateDecryptor(key, iv);
+            using ICryptoTransform encryptor = algorithm.CreateEncryptor(key, null);
 
-            return transform.TransformFinalBlock(input, 0, input.Length);
+            byte[] output = new byte[input.Length];
+            byte[] counter = new byte[Iv_bytes];
+            Array.Copy(iv, counter, counter.Length);
+
+            byte[] gamma = new byte[Iv_bytes];
+            int offset = 0;
+            while (offset < input.Length)
+            {
+                encryptor.TransformBlock(counter, 0, counter.Length, gamma, 0);
+
+                int block_length = Math.Min(Iv_bytes, input.Length - offset);
+                for (int i = 0; i < block_length; i++)
+                    output[offset + i] = (byte)(input[offset + i] ^ gamma[i]);
+
+                Increment_counter(counter);
+                offset += block_length;
+            }
+
+            return output;
+        }
+
+        static void Increment_counter(byte[] counter)
+        {
+            for (int i = counter.Length - 1; i >= 0; i--)
+            {
+                counter[i]++;
+                if (counter[i] != 0)
+                    return;
+            }
         }
     }
 }

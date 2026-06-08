@@ -168,7 +168,7 @@ namespace FNS_graphics
         {
             return encryption_core switch
             {
-                Encryption_core_kind.KuznyechikCbc => new Strategy_wrapper(new Kuznyechik_strategy()),
+                Encryption_core_kind.KuznyechikCtr => new Strategy_wrapper(new Kuznyechik_strategy()),
                 Encryption_core_kind.AesGcm => new Strategy_wrapper(new Aes_gcm_strategy()),
                 _ => Build_fns_wrapper()
             };
@@ -177,7 +177,7 @@ namespace FNS_graphics
         static Cipher_options? Build_stochastic_cipher_options(Stochastic_cli_options options)
         {
             Encryption_core_kind encryption_core = options.Encryption_core;
-            if (encryption_core != Encryption_core_kind.KuznyechikCbc &&
+            if (encryption_core != Encryption_core_kind.KuznyechikCtr &&
                 encryption_core != Encryption_core_kind.AesGcm &&
                 options.Block_plain_text_length <= 0)
                 return null;
@@ -343,7 +343,7 @@ namespace FNS_graphics
             internal Encryption_core_kind Encryption_core { get; private init; } = Encryption_core_kind.Factorial;
             internal string Core_display_name => Encryption_core switch
             {
-                Encryption_core_kind.KuznyechikCbc => Encryption_core_catalog.Kuznyechik_cbc_display_name,
+                Encryption_core_kind.KuznyechikCtr => Encryption_core_catalog.Kuznyechik_ctr_display_name,
                 Encryption_core_kind.AesGcm => Encryption_core_catalog.Aes_gcm_display_name,
                 _ => Encryption_core_catalog.Factorial_display_name
             };
@@ -437,7 +437,7 @@ namespace FNS_graphics
                 string normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
                 return normalized switch
                 {
-                    "kuz" or "kuznyechik" or "grasshopper" or "кузнечик" => Encryption_core_kind.KuznyechikCbc,
+                    "kuz" or "kuznyechik" or "grasshopper" or "кузнечик" => Encryption_core_kind.KuznyechikCtr,
                     "aes" or "aes-gcm" or "aesgcm" => Encryption_core_kind.AesGcm,
                     "fns" or "factorial" or "фсс" => Encryption_core_kind.Factorial,
                     _ => throw new ArgumentException($"Неизвестное ядро шифрования: {value}")

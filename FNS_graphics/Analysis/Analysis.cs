@@ -1,94 +1,30 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.IO;
-using System.Linq;
-using System.Threading;
+using System.Text;
 using static System.Console;
 using Digit = System.UInt16;
-using OfficeOpenXml;
-using System.Diagnostics;
-using System.Text;
 
 namespace FNS_rebuild
 {
     internal class Analysis
     {
-        public static bool debug_mode = false;  // вся отладочная информация будет выводиться в консоль 
-        const int Default_analysis_key_length = 64;  // длина служебного ключа для теста чувствительности к ключу
+        public static bool debug_mode = false;  // вся отладочная информация будет выводиться в консоль
+        const int Default_comparison_block_length = 1096;
+        const string Fss_analysis_key = "ANALYSIS_FSS_ROUND_KEY_256";
+        const string Standard_core_analysis_key = "ANALYSIS_CORE_COMPARISON_KEY_256";
 
         public static void Run_three_analysis_reports(Strategy_wrapper wrapper)
         {
-            // Пакетный режим анализа:
-            // 1) типичный блок 512, длины 1..5000;
-            // 2) рабочий блок 1096, длины 1..5000;
-            // 3) одноблочный профиль 1096, длины 1..1096.
-            // Каждый прогон пишет отдельный xlsx-файл.
+            // Пакетный режим анализа для последующей сборки графиков в Python:
+            // 1) сравнение ФСС по длине открытого блока 512/1096;
+            // 2) сравнение ФСС с раундовым шифрованием и без него;
+            // 3) сравнение ядер шифрования между собой.
             string output_dir = Path.Combine(AppContext.BaseDirectory, "analysis_reports");
             Directory.CreateDirectory(output_dir);
 
-            Build_performance_report(
-                wrapper,
-                new Cipher_options { Block_plain_text_length = 512, Key = "" },
-                new Performance_report_options
-                {
-                    Min_length = 1,
-                    Max_length = 5000,
-                    Tests_per_length = 3,
-                    Avalanche_tests_per_length = 3,
-                    Progress_step = 250,
-                    Output_xlsx_path = Path.Combine(output_dir, "analysis_block_512_len_1_5000.xlsx"),
-                    Include_avalanche_sheet = true
-                });
-
-            Build_performance_report(
-                wrapper,
-                new Cipher_options { Block_plain_text_length = 1096, Key = "" },
-                new Performance_report_options
-                {
-                    Min_length = 1,
-                    Max_length = 5000,
-                    Tests_per_length = 3,
-                    Avalanche_tests_per_length = 3,
-                    Progress_step = 250,
-                    Output_xlsx_path = Path.Combine(output_dir, "analysis_block_1096_len_1_5000.xlsx"),
-                    Include_avalanche_sheet = true
-                });
-
-            Build_performance_report(
-                wrapper,
-                new Cipher_options { Block_plain_text_length = 1096, Key = "" },
-                new Performance_report_options
-                {
-                    Min_length = 1,
-                    Max_length = 1096,
-                    Tests_per_length = 3,
-                    Avalanche_tests_per_length = 3,
-                    Progress_step = 100,
-                    Output_xlsx_path = Path.Combine(output_dir, "analysis_singleblock_1096_len_1_1096.xlsx"),
-                    Include_avalanche_sheet = true
-                });
-        }
-
-        internal sealed class Performance_report_options
-        {
-            // Диапазон длин исходной строки (ось X).
-            public int Min_length = 1;
-            public int Max_length = 5000;
-
-            // Количество прогонов Encrypt/Decrypt для каждой длины (усреднение).
-            public int Tests_per_length = 3;
-
-            // Количество прогонов лавинного теста для каждой длины (усреднение).
-            public int Avalanche_tests_per_length = 3;
-
-            // Шаг вывода прогресса в консоль.
-            public int Progress_step = 250;
-
-            // Путь до одного итогового xlsx-файла.
-            public string Output_xlsx_path = Path.Combine(AppContext.BaseDirectory, "FNS_analysis.xlsx");
-
-            // Включать ли лист лавинного теста.
-            public bool Include_avalanche_sheet = true;
+            Build_fss_block_length_comparison(output_dir);
+            Build_fss_round_cipher_comparison(output_dir);
+            Build_encryption_core_comparison(output_dir);
         }
 
         public static void Print(Digit[] input, int width = 5, int per_line = 10)
@@ -111,17 +47,18 @@ namespace FNS_rebuild
                 {
                     output.Append(value.PadRight(width));
                 }
+
                 if (per_line > 0 && counter % per_line == 0)
                     output.Append('\n');
                 counter++;
             }
-            output.Append("\n");
+
+            output.Append('\n');
             WriteLine(output.ToString());
         }
 
         public static void Print_factorial_table()
         {
-            // выводит заполненную таблицу факториалов из Factorial_encoding.factorial_table
             for (int i = 0; i < Factorial_encoding.factorial_table.Count; i++)
             {
                 WriteLine($"{i + 1}! = ");
@@ -131,18 +68,7 @@ namespace FNS_rebuild
 
         public static string Generate_random_string(int length)
         {
-            // генерирует случайную строку заданной длины из символов Factorial_strategy.alphabet
-            if (length <= 0 || string.IsNullOrEmpty(Factorial_strategy.alphabet))
-                return "";
-
-            string alphabet = Factorial_strategy.alphabet;
-            int alphabet_length = alphabet.Length;
-            char[] result = new char[length];
-
-            for (int i = 0; i < length; i++)
-                result[i] = alphabet[Random.Shared.Next(alphabet_length)];
-
-            return new string(result);
+            return Analysis_random_data.Generate_random_string(length);
         }
 
         public static int Find_max_source_length_without_blocks()
@@ -191,432 +117,174 @@ namespace FNS_rebuild
             Cipher_options options,
             Performance_report_options? report_options = null)
         {
-            // Строит один xlsx-документ с листами данных:
-            // 1) коэффициент увеличения;
-            // 2) абсолютный прирост длины;
-            // 3) скорость Encrypt;
-            // 4) скорость Decrypt;
-            // 5) распределение символов;
-            // 6) лавинный эффект (опционально).
-
             report_options ??= new Performance_report_options();
-            Validate_report_options(report_options);
-
-            List<Performance_point> points = [];
-            Dictionary<char, long> symbol_counts = [];
-            long total_ciphertext_symbols = 0;
-
-            int total_lengths = (report_options.Max_length - report_options.Min_length) + 1;
-            int processed = 0;
+            report_options.Validate();
 
             WriteLine("Запуск анализа производительности шифрования...");
             WriteLine($"Диапазон длин: {report_options.Min_length}..{report_options.Max_length}");
-            WriteLine($"Повторов на длину: {report_options.Tests_per_length}");
+            WriteLine($"Повторов Encrypt/Decrypt на длину: {report_options.Tests_per_length}");
             if (report_options.Include_avalanche_sheet)
-                WriteLine($"Повторов лавинного теста на длину: {report_options.Avalanche_tests_per_length}");
+                WriteLine($"Парных тестов лавины/ключа на длину: {report_options.Avalanche_tests_per_length}");
+            if (report_options.Include_interference_sheet)
+                WriteLine($"Тестов помехоустойчивости на длину: {report_options.Interference_tests_per_length}");
 
-            for (int length = report_options.Min_length; length <= report_options.Max_length; length++)
-            {
-                Performance_point point = Measure_one_length(
-                    wrapper,
-                    options,
-                    length,
-                    report_options.Tests_per_length,
-                    report_options.Avalanche_tests_per_length,
-                    report_options.Include_avalanche_sheet,
-                    symbol_counts,
-                    ref total_ciphertext_symbols);
+            Analysis_report report = Analysis_metrics_collector.Collect(
+                wrapper,
+                options,
+                report_options,
+                write_progress: WriteLine);
 
-                points.Add(point);
-                processed++;
-
-                if (processed % report_options.Progress_step == 0 || processed == total_lengths)
-                    WriteLine($"Прогресс анализа: {processed}/{total_lengths} длин");
-            }
-
-            Save_report_to_excel(
-                points,
-                report_options.Output_xlsx_path,
-                symbol_counts,
-                total_ciphertext_symbols,
-                report_options.Include_avalanche_sheet);
+            Analysis_excel_report_writer.Save(report, report_options.Output_xlsx_path);
 
             WriteLine($"Анализ завершён. Файл создан: {report_options.Output_xlsx_path}");
         }
 
-        static void Validate_report_options(Performance_report_options options)
+        static void Build_fss_block_length_comparison(string output_dir)
         {
-            if (options.Min_length < 1)
-                throw new ArgumentOutOfRangeException(nameof(options.Min_length), "Минимальная длина должна быть >= 1.");
+            Performance_report_options options = Build_default_comparison_options(
+                Path.Combine(output_dir, "01_fss_block_length_comparison.xlsx"));
 
-            if (options.Max_length < options.Min_length)
-                throw new ArgumentOutOfRangeException(nameof(options.Max_length), "Максимальная длина должна быть >= минимальной.");
+            Analysis_comparison_series[] series =
+            [
+                Collect_series(
+                    "ФСС, блок 512",
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = 512,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = true,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options),
+                Collect_series(
+                    "ФСС, блок 1096",
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = 1096,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = true,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options)
+            ];
 
-            if (options.Tests_per_length < 1)
-                throw new ArgumentOutOfRangeException(nameof(options.Tests_per_length), "Тестов на длину должно быть >= 1.");
-
-            if (options.Avalanche_tests_per_length < 1)
-                throw new ArgumentOutOfRangeException(nameof(options.Avalanche_tests_per_length), "Лавинных тестов на длину должно быть >= 1.");
-
-            if (options.Progress_step < 1)
-                throw new ArgumentOutOfRangeException(nameof(options.Progress_step), "Шаг прогресса должен быть >= 1.");
-
-            if (string.IsNullOrWhiteSpace(options.Output_xlsx_path))
-                throw new ArgumentException("Нужно указать путь для выходного xlsx-файла.", nameof(options.Output_xlsx_path));
+            Analysis_comparison_excel_writer.Save(series, options.Output_xlsx_path);
+            WriteLine($"Сравнение длин блоков ФСС создано: {options.Output_xlsx_path}");
         }
 
-        static Performance_point Measure_one_length(
+        static void Build_fss_round_cipher_comparison(string output_dir)
+        {
+            Performance_report_options options = Build_default_comparison_options(
+                Path.Combine(output_dir, "02_fss_round_cipher_comparison.xlsx"));
+
+            Analysis_comparison_series[] series =
+            [
+                Collect_series(
+                    "ФСС, раундовое шифрование включено",
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = Default_comparison_block_length,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = true,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options),
+                Collect_series(
+                    "ФСС, раундовое шифрование отключено",
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = Default_comparison_block_length,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = false,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options)
+            ];
+
+            Analysis_comparison_excel_writer.Save(series, options.Output_xlsx_path);
+            WriteLine($"Сравнение раундового слоя ФСС создано: {options.Output_xlsx_path}");
+        }
+
+        static void Build_encryption_core_comparison(string output_dir)
+        {
+            Performance_report_options options = Build_default_comparison_options(
+                Path.Combine(output_dir, "03_encryption_core_comparison.xlsx"));
+
+            Analysis_comparison_series[] series =
+            [
+                Collect_series(
+                    Encryption_core_catalog.Factorial_display_name,
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = Default_comparison_block_length,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = true,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options),
+                Collect_series(
+                    Encryption_core_catalog.Aes_gcm_display_name,
+                    new Strategy_wrapper(new Aes_gcm_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = 0,
+                        Key = Standard_core_analysis_key,
+                        Enable_round_cipher = false,
+                        Encryption_core = Encryption_core_kind.AesGcm
+                    },
+                    options),
+                Collect_series(
+                    Encryption_core_catalog.Kuznyechik_ctr_display_name,
+                    new Strategy_wrapper(new Kuznyechik_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = 0,
+                        Key = Standard_core_analysis_key,
+                        Enable_round_cipher = false,
+                        Encryption_core = Encryption_core_kind.KuznyechikCtr
+                    },
+                    options)
+            ];
+
+            Analysis_comparison_excel_writer.Save(series, options.Output_xlsx_path);
+            WriteLine($"Сравнение ядер шифрования создано: {options.Output_xlsx_path}");
+        }
+
+        static Performance_report_options Build_default_comparison_options(string output_path)
+        {
+            return new Performance_report_options
+            {
+                Min_length = 1,
+                Max_length = 5000,
+                Tests_per_length = 3,
+                Avalanche_tests_per_length = 3,
+                Interference_tests_per_length = 3,
+                Progress_step = 250,
+                Output_xlsx_path = output_path,
+                Include_avalanche_sheet = true,
+                Include_interference_sheet = true
+            };
+        }
+
+        static Analysis_comparison_series Collect_series(
+            string name,
             Strategy_wrapper wrapper,
-            Cipher_options options,
-            int length,
-            int tests_per_length,
-            int avalanche_tests_per_length,
-            bool include_avalanche,
-            Dictionary<char, long> symbol_counts,
-            ref long total_ciphertext_symbols)
+            Cipher_options cipher_options,
+            Performance_report_options report_options)
         {
-            long total_encrypt_ticks = 0;
-            long total_decrypt_ticks = 0;
-            long total_ciphertext_length = 0;
-            double avalanche_sum = 0.0;
+            WriteLine($"Сбор серии: {name}");
+            Analysis_report report = Analysis_metrics_collector.Collect(
+                wrapper,
+                cipher_options,
+                report_options,
+                write_progress: message => WriteLine($"{name}: {message}"));
 
-            for (int i = 0; i < tests_per_length; i++)
-            {
-                string source = Generate_random_string(length);
-
-                Stopwatch encrypt_watch = Stopwatch.StartNew();
-                string ciphertext = wrapper.Encrypt(source, options);
-                encrypt_watch.Stop();
-
-                Stopwatch decrypt_watch = Stopwatch.StartNew();
-                string restored = wrapper.Decrypt(ciphertext, options);
-                decrypt_watch.Stop();
-
-                if (restored != source)
-                    throw new InvalidOperationException($"Ошибка анализа: decrypt(encrypt(source)) != source для длины {length}.");
-
-                total_encrypt_ticks += encrypt_watch.ElapsedTicks;
-                total_decrypt_ticks += decrypt_watch.ElapsedTicks;
-                total_ciphertext_length += ciphertext.Length;
-                Count_symbols(ciphertext, symbol_counts, ref total_ciphertext_symbols);
-            }
-
-            if (include_avalanche)
-            {
-                string base_key = Build_base_key_for_avalanche(options, length);
-                Cipher_options base_key_options = Clone_options_with_key(options, base_key);
-
-                for (int i = 0; i < avalanche_tests_per_length; i++)
-                {
-                    // Для оценки чувствительности к ключу фиксируется открытый текст,
-                    // меняется только один символ симметрического ключа.
-                    string source = Generate_deterministic_string(length, seed: i + length * 10007);
-                    string mutated_key = Mutate_one_symbol(base_key, mutation_index: i);
-                    Cipher_options mutated_key_options = Clone_options_with_key(options, mutated_key);
-
-                    string c1 = wrapper.Encrypt(source, base_key_options);
-                    string c2 = wrapper.Encrypt(source, mutated_key_options);
-                    avalanche_sum += Compute_symbol_difference_ratio(c1, c2);
-                }
-            }
-
-            double ticks_to_ms = 1000.0 / Stopwatch.Frequency;
-            double avg_encrypt_ms = (total_encrypt_ticks * ticks_to_ms) / tests_per_length;
-            double avg_decrypt_ms = (total_decrypt_ticks * ticks_to_ms) / tests_per_length;
-            double avg_ciphertext_length = (double)total_ciphertext_length / tests_per_length;
-            double expansion_ratio = avg_ciphertext_length / length;
-            double absolute_growth = avg_ciphertext_length - length;
-            double avalanche_ratio = include_avalanche
-                ? avalanche_sum / avalanche_tests_per_length
-                : 0.0;
-
-            return new Performance_point
-            {
-                Source_length = length,
-                Average_ciphertext_length = avg_ciphertext_length,
-                Expansion_ratio = expansion_ratio,
-                Absolute_growth = absolute_growth,
-                Average_encrypt_ms = avg_encrypt_ms,
-                Average_decrypt_ms = avg_decrypt_ms,
-                Avalanche_difference_ratio = avalanche_ratio
-            };
-        }
-
-        static string Generate_deterministic_string(int length, int seed)
-        {
-            if (length <= 0)
-                return "";
-
-            string alphabet = Factorial_strategy.alphabet;
-            int alphabet_length = alphabet.Length;
-            Random random = new(seed);
-            char[] result = new char[length];
-
-            for (int i = 0; i < length; i++)
-                result[i] = alphabet[random.Next(alphabet_length)];
-
-            return new string(result);
-        }
-
-        static string Mutate_one_symbol(string source, int mutation_index)
-        {
-            if (string.IsNullOrEmpty(source))
-                return source;
-
-            string alphabet = Factorial_strategy.alphabet;
-            if (alphabet.Length < 2)
-                return source;
-
-            int index = mutation_index % source.Length;
-            if (index < 0)
-                index += source.Length;
-
-            char old_symbol = source[index];
-            int old_pos = alphabet.IndexOf(old_symbol);
-            if (old_pos < 0)
-                old_pos = 0;
-
-            int new_pos = (old_pos + 1) % alphabet.Length;
-            char new_symbol = alphabet[new_pos];
-
-            char[] result = source.ToCharArray();
-            result[index] = new_symbol;
-            return new string(result);
-        }
-
-        static string Build_base_key_for_avalanche(Cipher_options options, int source_length)
-        {
-            // Возвращает базовый ключ для теста чувствительности к ключу.
-            if (options.Use_key())
-                return options.Key;
-
-            int key_length = Math.Min(Default_analysis_key_length, Math.Max(16, source_length));
-            return Generate_deterministic_string(key_length, seed: source_length * 7919 + 17);
-        }
-
-        static Cipher_options Clone_options_with_key(Cipher_options source, string key)
-        {
-            // Создаёт копию настроек с заменой только ключа.
-            return new Cipher_options
-            {
-                Block_plain_text_length = source.Block_plain_text_length,
-                Key = key,
-                Enable_round_cipher = source.Enable_round_cipher,
-                Encryption_core = source.Encryption_core
-            };
-        }
-
-        static double Compute_symbol_difference_ratio(string left, string right)
-        {
-            int min_len = Math.Min(left.Length, right.Length);
-            int max_len = Math.Max(left.Length, right.Length);
-            if (max_len == 0)
-                return 0.0;
-
-            int differences = 0;
-            for (int i = 0; i < min_len; i++)
-            {
-                if (left[i] != right[i])
-                    differences++;
-            }
-
-            differences += max_len - min_len;
-            return (double)differences / max_len;
-        }
-
-        static void Count_symbols(string ciphertext, Dictionary<char, long> symbol_counts, ref long total_ciphertext_symbols)
-        {
-            for (int i = 0; i < ciphertext.Length; i++)
-            {
-                char symbol = ciphertext[i];
-                symbol_counts.TryGetValue(symbol, out long count);
-                symbol_counts[symbol] = count + 1;
-                total_ciphertext_symbols++;
-            }
-        }
-
-        static void Save_report_to_excel(
-            List<Performance_point> points,
-            string output_xlsx_path,
-            Dictionary<char, long> symbol_counts,
-            long total_ciphertext_symbols,
-            bool include_avalanche_sheet)
-        {
-            string? directory = Path.GetDirectoryName(output_xlsx_path);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            FileInfo file = new(output_xlsx_path);
-            if (file.Exists)
-                file.Delete();
-
-            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-
-            using ExcelPackage package = new(file);
-
-            ExcelWorksheet expansion_sheet = package.Workbook.Worksheets.Add("Коэф_увеличения");
-            Fill_expansion_sheet(expansion_sheet, points);
-
-            ExcelWorksheet absolute_growth_sheet = package.Workbook.Worksheets.Add("Абс_прирост");
-            Fill_absolute_growth_sheet(absolute_growth_sheet, points);
-
-            ExcelWorksheet encrypt_sheet = package.Workbook.Worksheets.Add("Скорость_Encrypt");
-            Fill_speed_sheet(encrypt_sheet, points, is_encrypt: true);
-
-            ExcelWorksheet decrypt_sheet = package.Workbook.Worksheets.Add("Скорость_Decrypt");
-            Fill_speed_sheet(decrypt_sheet, points, is_encrypt: false);
-
-            ExcelWorksheet distribution_sheet = package.Workbook.Worksheets.Add("Распределение");
-            Fill_distribution_sheet(distribution_sheet, symbol_counts, total_ciphertext_symbols);
-
-            if (include_avalanche_sheet)
-            {
-                ExcelWorksheet avalanche_sheet = package.Workbook.Worksheets.Add("Лавинный_эффект");
-                Fill_avalanche_sheet(avalanche_sheet, points);
-            }
-
-            package.Save();
-        }
-
-        static void Fill_expansion_sheet(ExcelWorksheet sheet, List<Performance_point> points)
-        {
-            sheet.Cells[1, 1].Value = "Длина исходной строки";
-            sheet.Cells[1, 2].Value = "Средняя длина шифротекста";
-            sheet.Cells[1, 3].Value = "Коэффициент увеличения";
-
-            int row = 2;
-            foreach (Performance_point point in points)
-            {
-                sheet.Cells[row, 1].Value = point.Source_length;
-                sheet.Cells[row, 2].Value = point.Average_ciphertext_length;
-                sheet.Cells[row, 3].Value = point.Expansion_ratio;
-                row++;
-            }
-
-            sheet.Cells[2, 2, row - 1, 2].Style.Numberformat.Format = "0.000";
-            sheet.Cells[2, 3, row - 1, 3].Style.Numberformat.Format = "0.000000";
-            sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-        }
-
-        static void Fill_absolute_growth_sheet(ExcelWorksheet sheet, List<Performance_point> points)
-        {
-            sheet.Cells[1, 1].Value = "Длина исходной строки";
-            sheet.Cells[1, 2].Value = "Абсолютный прирост |C|-|M|";
-
-            int row = 2;
-            foreach (Performance_point point in points)
-            {
-                sheet.Cells[row, 1].Value = point.Source_length;
-                sheet.Cells[row, 2].Value = point.Absolute_growth;
-                row++;
-            }
-
-            sheet.Cells[2, 2, row - 1, 2].Style.Numberformat.Format = "0.000";
-            sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-        }
-
-        static void Fill_speed_sheet(ExcelWorksheet sheet, List<Performance_point> points, bool is_encrypt)
-        {
-            sheet.Cells[1, 1].Value = "Длина исходной строки";
-            sheet.Cells[1, 2].Value = is_encrypt ? "Среднее время шифрования, мс" : "Среднее время дешифрования, мс";
-
-            int row = 2;
-            foreach (Performance_point point in points)
-            {
-                sheet.Cells[row, 1].Value = point.Source_length;
-                sheet.Cells[row, 2].Value = is_encrypt ? point.Average_encrypt_ms : point.Average_decrypt_ms;
-                row++;
-            }
-
-            sheet.Cells[2, 2, row - 1, 2].Style.Numberformat.Format = "0.000000";
-            sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-        }
-
-        static void Fill_distribution_sheet(
-            ExcelWorksheet sheet,
-            Dictionary<char, long> symbol_counts,
-            long total_ciphertext_symbols)
-        {
-            sheet.Cells[1, 1].Value = "Индекс символа";
-            sheet.Cells[1, 2].Value = "Символ";
-            sheet.Cells[1, 3].Value = "Количество";
-            sheet.Cells[1, 4].Value = "Доля";
-
-            int row = 2;
-            string alphabet = Factorial_strategy.alphabet;
-
-            for (int i = 0; i < alphabet.Length; i++)
-            {
-                char symbol = alphabet[i];
-                symbol_counts.TryGetValue(symbol, out long count);
-                double share = total_ciphertext_symbols > 0
-                    ? (double)count / total_ciphertext_symbols
-                    : 0.0;
-
-                sheet.Cells[row, 1].Value = i;
-                sheet.Cells[row, 2].Value = symbol.ToString();
-                sheet.Cells[row, 3].Value = count;
-                sheet.Cells[row, 4].Value = share;
-                row++;
-            }
-
-            double entropy = Compute_entropy(symbol_counts, total_ciphertext_symbols);
-            sheet.Cells[1, 6].Value = "Всего символов";
-            sheet.Cells[1, 7].Value = total_ciphertext_symbols;
-            sheet.Cells[2, 6].Value = "Энтропия (бит/символ)";
-            sheet.Cells[2, 7].Value = entropy;
-
-            sheet.Cells[2, 4, row - 1, 4].Style.Numberformat.Format = "0.000000";
-            sheet.Cells[2, 7].Style.Numberformat.Format = "0.000000";
-            sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-        }
-
-        static void Fill_avalanche_sheet(ExcelWorksheet sheet, List<Performance_point> points)
-        {
-            // Лавинный эффект по ключу: доля отличающихся символов двух шифротекстов
-            // при фиксированном открытом тексте и изменении одного символа ключа.
-            sheet.Cells[1, 1].Value = "Длина исходной строки";
-            sheet.Cells[1, 2].Value = "Средняя доля отличий шифротекстов (изменение 1 символа ключа)";
-
-            int row = 2;
-            foreach (Performance_point point in points)
-            {
-                sheet.Cells[row, 1].Value = point.Source_length;
-                sheet.Cells[row, 2].Value = point.Avalanche_difference_ratio;
-                row++;
-            }
-
-            sheet.Cells[2, 2, row - 1, 2].Style.Numberformat.Format = "0.000000";
-            sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
-        }
-
-        static double Compute_entropy(Dictionary<char, long> symbol_counts, long total_ciphertext_symbols)
-        {
-            if (total_ciphertext_symbols <= 0)
-                return 0.0;
-
-            double entropy = 0.0;
-            foreach (var pair in symbol_counts)
-            {
-                if (pair.Value <= 0)
-                    continue;
-
-                double p = (double)pair.Value / total_ciphertext_symbols;
-                entropy -= p * Math.Log2(p);
-            }
-
-            return entropy;
-        }
-
-        sealed class Performance_point
-        {
-            internal int Source_length = 0;
-            internal double Average_ciphertext_length = 0;
-            internal double Expansion_ratio = 0;
-            internal double Absolute_growth = 0;
-            internal double Average_encrypt_ms = 0;
-            internal double Average_decrypt_ms = 0;
-            internal double Avalanche_difference_ratio = 0;
+            return new Analysis_comparison_series(name, report);
         }
     }
 }

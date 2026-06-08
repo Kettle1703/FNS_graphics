@@ -1,9 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
@@ -30,11 +31,13 @@ namespace FNS_graphics
 
         private static readonly JsonSerializerOptions TransferJsonSerializerOptions = new()
         {
-            WriteIndented = true
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
         private static readonly JsonSerializerOptions TransferPayloadJsonSerializerOptions = new()
         {
-            WriteIndented = false
+            WriteIndented = false,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
         private const int DefaultBlockLength = 1096;
         private const int TransferPacketDataShards = 8;
@@ -68,7 +71,7 @@ namespace FNS_graphics
             SharedSenderPublicKeySignatureTextBox.Text = string.Empty;
             SharedReceiverPublicKeyFingerprintTextBox.Text = AutoPlaceholder;
             ActiveRecipientLinkTextBlock.Text = "Связь: не выбрана";
-            SharedSessionKeyTextBox.Text = AutoPlaceholder;
+            SharedKeyDerivationSaltTextBox.Text = AutoPlaceholder;
             TransferCipherTextTextBox.Text = string.Empty;
 
             EncryptMetricsTextBlock.Text = "Ядро: - | Обёртка: - | Длина: -";
@@ -245,7 +248,7 @@ namespace FNS_graphics
             DecryptMetricsTextBlock.Text = Build_length_metrics_text(packet.Ciphertext.Length);
             SharedSenderPublicKeyTextBox.Text = packet.Ephemeral_public_key;
             SharedSenderPublicKeySignatureTextBox.Text = packet.Ephemeral_public_key_signature;
-            SharedSessionKeyTextBox.Text = packet.Encrypted_symmetric_key;
+            SharedKeyDerivationSaltTextBox.Text = packet.Key_derivation_salt;
 
             if (SharedReceiverPublicKeyFingerprintTextBox.IsEnabled &&
                 !string.IsNullOrWhiteSpace(packet.Sender_signing_key_fingerprint))
@@ -259,7 +262,7 @@ namespace FNS_graphics
                     TransferCipherTextTextBox,
                     SharedSenderPublicKeyTextBox,
                     SharedSenderPublicKeySignatureTextBox,
-                    SharedSessionKeyTextBox,
+                    SharedKeyDerivationSaltTextBox,
                     SharedReceiverPublicKeyFingerprintTextBox);
             }
             else
@@ -267,7 +270,7 @@ namespace FNS_graphics
                 MarkPersistentHighlights(
                     TransferCipherTextTextBox,
                     SharedSenderPublicKeyTextBox,
-                    SharedSessionKeyTextBox);
+                    SharedKeyDerivationSaltTextBox);
             }
 
             StatusTextBlock.Text = Build_status_text(status =>
@@ -375,7 +378,7 @@ namespace FNS_graphics
                 TransferCipherTextTextBox.Text = packet.Ciphertext;
                 SharedSenderPublicKeyTextBox.Text = packet.Ephemeral_public_key;
                 SharedSenderPublicKeySignatureTextBox.Text = packet.Ephemeral_public_key_signature;
-                SharedSessionKeyTextBox.Text = packet.Encrypted_symmetric_key;
+                SharedKeyDerivationSaltTextBox.Text = packet.Key_derivation_salt;
 
                 EncryptMetricsTextBlock.Text = Build_operation_metrics_text(timing, request.Source_text.Length);
                 DecryptMetricsTextBlock.Text = Build_length_metrics_text(packet.Ciphertext.Length);
@@ -386,14 +389,14 @@ namespace FNS_graphics
                         SharedSenderPublicKeyTextBox,
                         SharedSenderPublicKeySignatureTextBox,
                         SharedReceiverPublicKeyFingerprintTextBox,
-                        SharedSessionKeyTextBox);
+                        SharedKeyDerivationSaltTextBox);
                 }
                 else
                 {
                     MarkPersistentHighlights(
                         TransferCipherTextTextBox,
                         SharedSenderPublicKeyTextBox,
-                        SharedSessionKeyTextBox);
+                        SharedKeyDerivationSaltTextBox);
                 }
 
                 StatusTextBlock.Text = Build_status_text(status =>
@@ -440,7 +443,7 @@ namespace FNS_graphics
             if (!Window_input_validation.TryBuildDecryptPacket(
                     TransferCipherTextTextBox.Text,
                     SharedSenderPublicKeyTextBox.Text,
-                    SharedSessionKeyTextBox.Text,
+                    SharedKeyDerivationSaltTextBox.Text,
                     SharedSenderPublicKeySignatureTextBox.Text,
                     DefaultBlockLength,
                     IsRoundCipherEnabled(),
@@ -808,7 +811,7 @@ namespace FNS_graphics
             bool same_payload =
                 string.Equals(packet.Ciphertext, _lastEncryptedPacket.Ciphertext, StringComparison.Ordinal) &&
                 string.Equals(packet.Ephemeral_public_key, _lastEncryptedPacket.Ephemeral_public_key, StringComparison.Ordinal) &&
-                string.Equals(packet.Encrypted_symmetric_key, _lastEncryptedPacket.Encrypted_symmetric_key, StringComparison.Ordinal);
+                string.Equals(packet.Key_derivation_salt, _lastEncryptedPacket.Key_derivation_salt, StringComparison.Ordinal);
 
             if (!same_payload)
                 return;
@@ -828,7 +831,7 @@ namespace FNS_graphics
             return new Hybrid_cipher_package
             {
                 Ciphertext = source.Ciphertext,
-                Encrypted_symmetric_key = source.Encrypted_symmetric_key,
+                Key_derivation_salt = source.Key_derivation_salt,
                 Ephemeral_public_key = source.Ephemeral_public_key,
                 Ephemeral_public_key_signature = source.Ephemeral_public_key_signature,
                 Sender_signing_key_fingerprint = source.Sender_signing_key_fingerprint,
@@ -908,7 +911,7 @@ namespace FNS_graphics
             string ephemeral_public_key = Base64_url_codec.Canonicalize_if_possible(payload.Ephemeral_public_key);
             string signature = Base64_url_codec.Canonicalize_if_possible(payload.Ephemeral_public_key_signature);
             string sender_fingerprint = payload.Sender_signing_key_fingerprint?.Trim() ?? string.Empty;
-            string encrypted_symmetric_key = Base64_url_codec.Canonicalize_if_possible(payload.Encrypted_symmetric_key);
+            string key_derivation_salt = Base64_url_codec.Canonicalize_if_possible(payload.Key_derivation_salt);
 
             if (ciphertext.Length == 0)
             {
@@ -922,9 +925,9 @@ namespace FNS_graphics
                 return false;
             }
 
-            if (!Try_decode_base64(encrypted_symmetric_key, out _))
+            if (!Try_decode_base64(key_derivation_salt, out _))
             {
-                error_message = "В JSON-пакете поле Encrypted_symmetric_key должно быть корректным Base64/Base64URL.";
+                error_message = "В JSON-пакете поле Key_derivation_salt должно быть корректным Base64/Base64URL.";
                 return false;
             }
 
@@ -946,7 +949,7 @@ namespace FNS_graphics
                 Ephemeral_public_key = ephemeral_public_key,
                 Ephemeral_public_key_signature = signature,
                 Sender_signing_key_fingerprint = sender_fingerprint,
-                Encrypted_symmetric_key = encrypted_symmetric_key,
+                Key_derivation_salt = key_derivation_salt,
                 Block_plain_text_length = DefaultBlockLength,
                 Round_cipher_enabled = payload.Round_cipher_enabled,
                 Encryption_core = Encryption_core_catalog.From_storage_id(payload.Encryption_core),
@@ -1047,7 +1050,7 @@ namespace FNS_graphics
                     Ephemeral_public_key = packet.Ephemeral_public_key,
                     Ephemeral_public_key_signature = packet.Ephemeral_public_key_signature,
                     Sender_signing_key_fingerprint = packet.Sender_signing_key_fingerprint,
-                    Encrypted_symmetric_key = packet.Encrypted_symmetric_key,
+                    Key_derivation_salt = packet.Key_derivation_salt,
                     Round_cipher_enabled = packet.Round_cipher_enabled,
                     Encryption_core = Encryption_core_catalog.To_storage_id(packet.Encryption_core),
                     Ciphertext = packet.Ciphertext
@@ -1115,7 +1118,7 @@ namespace FNS_graphics
             public string Sender_signing_key_fingerprint { get; set; } = string.Empty;
 
             [JsonPropertyOrder(4)]
-            public string Encrypted_symmetric_key { get; set; } = string.Empty;
+            public string Key_derivation_salt { get; set; } = string.Empty;
 
             [JsonPropertyOrder(5)]
             public bool Round_cipher_enabled { get; set; } = true;

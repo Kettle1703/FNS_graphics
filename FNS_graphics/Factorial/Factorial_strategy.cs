@@ -122,7 +122,7 @@ namespace FNS_rebuild
             if (options.Use_blocks())
                 return Encrypt_by_blocks(input, options);
 
-            byte[] message_nonce = Round_coefficient_cipher.Create_message_nonce();
+            byte[] message_nonce = Get_message_nonce_for_encrypt(options);
             string block_encrypted = Encrypt_single_block(input, options, message_nonce, block_index: 0);
 
             StringBuilder output = new();
@@ -177,7 +177,7 @@ namespace FNS_rebuild
             int source_text_length = input.Length;
             int block_plain_text_length = options.Block_plain_text_length;
             StringBuilder output = new();
-            byte[] message_nonce = Round_coefficient_cipher.Create_message_nonce();
+            byte[] message_nonce = Get_message_nonce_for_encrypt(options);
 
             Write_u16(output, source_text_length);
             Write_u16(output, block_plain_text_length);
@@ -250,6 +250,22 @@ namespace FNS_rebuild
                 throw new InvalidOperationException("Длина открытого блока должна быть положительной.");
 
             return (source_text_length + block_plain_text_length - 1) / block_plain_text_length;
+        }
+
+        static byte[] Get_message_nonce_for_encrypt(Cipher_options options)
+        {
+            if (options.Fixed_message_nonce is null)
+                return Round_coefficient_cipher.Create_message_nonce();
+
+            if (options.Fixed_message_nonce.Length != Round_coefficient_cipher.Message_nonce_bytes)
+            {
+                throw new InvalidOperationException(
+                    $"Некорректная длина фиксированного nonce: {options.Fixed_message_nonce.Length}.");
+            }
+
+            byte[] result = new byte[options.Fixed_message_nonce.Length];
+            Array.Copy(options.Fixed_message_nonce, result, result.Length);
+            return result;
         }
 
         static int Get_plain_block_length(int source_text_length, int block_plain_text_length, int block_index)

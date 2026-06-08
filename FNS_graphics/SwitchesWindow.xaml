@@ -105,7 +105,7 @@
                         </TextBlock>
                         <ComboBox x:Name="EncryptionCoreComboBox">
                             <ComboBoxItem Content="Факториальная система счисления" />
-                            <ComboBoxItem Content="Кузнечик-CBC (ГОСТ Р 34.12-2015 / ГОСТ Р 34.13-2015)" />
+                            <ComboBoxItem Content="Кузнечик-CTR (ГОСТ Р 34.12-2015 / ГОСТ Р 34.13-2015)" />
                             <ComboBoxItem Content="AES-GCM-256" />
                         </ComboBox>
                     </StackPanel>

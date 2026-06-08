@@ -20,7 +20,7 @@ namespace FNS_graphics
             Ui_toggle_settings ui_toggle_settings = Ui_toggle_store.Get_snapshot();
             EncryptionCoreComboBox.SelectedIndex = ui_toggle_settings.Encryption_core switch
             {
-                Encryption_core_kind.KuznyechikCbc => 1,
+                Encryption_core_kind.KuznyechikCtr => 1,
                 Encryption_core_kind.AesGcm => 2,
                 _ => 0
             };
@@ -69,7 +69,7 @@ namespace FNS_graphics
                 Enable_round_cipher = EnableRoundCipherCheckBox.IsChecked != false,
                 Encryption_core = EncryptionCoreComboBox.SelectedIndex switch
                 {
-                    1 => Encryption_core_kind.KuznyechikCbc,
+                    1 => Encryption_core_kind.KuznyechikCtr,
                     2 => Encryption_core_kind.AesGcm,
                     _ => Encryption_core_kind.Factorial
                 }
