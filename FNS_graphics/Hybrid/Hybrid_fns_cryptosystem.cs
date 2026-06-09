@@ -160,7 +160,7 @@ namespace FNS_rebuild
                     Key_derivation_salt = Base64_url_codec.Encode(key_derivation_material),
                     Ephemeral_public_key = Base64_url_codec.Encode(ephemeral_public_key_spki),
                     Block_plain_text_length = options.Block_plain_text_length,
-                    Round_cipher_enabled = options.Enable_round_cipher,
+                    Round_cipher_enabled = options.Encryption_core == Encryption_core_kind.Factorial,
                     Encryption_core = options.Encryption_core,
                     Curve_id = Curve_id_nist_p256
                 };
@@ -228,7 +228,7 @@ namespace FNS_rebuild
             {
                 Block_plain_text_length = options.Block_plain_text_length,
                 Key = auto_fss_key,
-                Enable_round_cipher = options.Enable_round_cipher,
+                Enable_round_cipher = true,
                 Encryption_core = Encryption_core_kind.Factorial
             };
 
@@ -244,7 +244,7 @@ namespace FNS_rebuild
             {
                 Block_plain_text_length = packet.Block_plain_text_length,
                 Key = auto_fss_key,
-                Enable_round_cipher = packet.Round_cipher_enabled,
+                Enable_round_cipher = true,
                 Encryption_core = Encryption_core_kind.Factorial
             };
 

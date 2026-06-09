@@ -8,6 +8,7 @@ namespace FNS_rebuild
         // Диапазон длин исходной строки в символах. Это ось X для всех листов.
         public int Min_length = 1;
         public int Max_length = 5000;
+        public int Length_step = 1;
 
         // Количество прогонов Encrypt/Decrypt для каждой длины.
         public int Tests_per_length = 3;
@@ -37,6 +38,9 @@ namespace FNS_rebuild
 
             if (Max_length < Min_length)
                 throw new ArgumentOutOfRangeException(nameof(Max_length), "Максимальная длина должна быть >= минимальной.");
+
+            if (Length_step < 1)
+                throw new ArgumentOutOfRangeException(nameof(Length_step), "Шаг длины должен быть >= 1.");
 
             if (Tests_per_length < 1)
                 throw new ArgumentOutOfRangeException(nameof(Tests_per_length), "Тестов на длину должно быть >= 1.");

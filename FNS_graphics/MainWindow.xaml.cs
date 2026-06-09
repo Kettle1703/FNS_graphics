@@ -298,7 +298,6 @@ namespace FNS_graphics
                     _activeRecipientReceiverPublicKeySpki,
                     _receiverPublicKeySpki,
                     DefaultBlockLength,
-                    IsRoundCipherEnabled(),
                     GetSelectedEncryptionCore(),
                     AutoPlaceholder,
                     out Encrypt_request request,
@@ -446,7 +445,6 @@ namespace FNS_graphics
                     SharedKeyDerivationSaltTextBox.Text,
                     SharedSenderPublicKeySignatureTextBox.Text,
                     DefaultBlockLength,
-                    IsRoundCipherEnabled(),
                     GetSelectedEncryptionCore(),
                     AutoPlaceholder,
                     out Hybrid_cipher_package packet,
@@ -760,11 +758,6 @@ namespace FNS_graphics
             return DisableReedSolomonForJsonCheckBox.IsChecked == true;
         }
 
-        private static bool IsRoundCipherEnabled()
-        {
-            return Ui_toggle_store.Get_snapshot().Enable_round_cipher;
-        }
-
         private void Load_ui_toggle_snapshot_into_controls()
         {
             // Подтягивает состояние интерфейсных переключателей из общего in-memory хранилища.
@@ -822,8 +815,8 @@ namespace FNS_graphics
             if (string.IsNullOrWhiteSpace(packet.Sender_signing_key_fingerprint))
                 packet.Sender_signing_key_fingerprint = _lastEncryptedPacket.Sender_signing_key_fingerprint;
 
-            packet.Round_cipher_enabled = _lastEncryptedPacket.Round_cipher_enabled;
             packet.Encryption_core = _lastEncryptedPacket.Encryption_core;
+            packet.Round_cipher_enabled = Is_factorial_round_cipher_enabled(packet.Encryption_core);
         }
 
         private static Hybrid_cipher_package Clone_packet(Hybrid_cipher_package source)
@@ -836,8 +829,8 @@ namespace FNS_graphics
                 Ephemeral_public_key_signature = source.Ephemeral_public_key_signature,
                 Sender_signing_key_fingerprint = source.Sender_signing_key_fingerprint,
                 Block_plain_text_length = source.Block_plain_text_length,
-                Round_cipher_enabled = source.Round_cipher_enabled,
                 Encryption_core = source.Encryption_core,
+                Round_cipher_enabled = Is_factorial_round_cipher_enabled(source.Encryption_core),
                 Curve_id = source.Curve_id
             };
         }
@@ -943,6 +936,7 @@ namespace FNS_graphics
                 return false;
             }
 
+            Encryption_core_kind encryption_core = Encryption_core_catalog.From_storage_id(payload.Encryption_core);
             packet = new Hybrid_cipher_package
             {
                 Ciphertext = ciphertext,
@@ -951,11 +945,16 @@ namespace FNS_graphics
                 Sender_signing_key_fingerprint = sender_fingerprint,
                 Key_derivation_salt = key_derivation_salt,
                 Block_plain_text_length = DefaultBlockLength,
-                Round_cipher_enabled = payload.Round_cipher_enabled,
-                Encryption_core = Encryption_core_catalog.From_storage_id(payload.Encryption_core),
+                Encryption_core = encryption_core,
+                Round_cipher_enabled = Is_factorial_round_cipher_enabled(encryption_core),
                 Curve_id = Hybrid_fns_cryptosystem.Curve_id_nist_p256
             };
             return true;
+        }
+
+        private static bool Is_factorial_round_cipher_enabled(Encryption_core_kind encryption_core)
+        {
+            return encryption_core == Encryption_core_kind.Factorial;
         }
 
         private static bool Try_parse_transmission_packet_json(

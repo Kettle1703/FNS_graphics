@@ -7,6 +7,8 @@ namespace FNS_rebuild
 {
     internal static class Analysis_excel_report_writer
     {
+        const double Bytes_per_kilobyte = 1024.0;
+
         internal static void Save(Analysis_report report, string output_xlsx_path)
         {
             string? directory = Path.GetDirectoryName(output_xlsx_path);
@@ -38,14 +40,14 @@ namespace FNS_rebuild
             Fill_single_metric_sheet(
                 package.Workbook.Worksheets.Add("Пропуск_шифрование"),
                 report.Points,
-                "Пропускная способность шифрования, байт/с",
-                point => point.Encrypt_throughput_bytes_per_second,
+                "Пропускная способность шифрования, КБ/с",
+                point => point.Encrypt_throughput_bytes_per_second / Bytes_per_kilobyte,
                 "0.000");
             Fill_single_metric_sheet(
                 package.Workbook.Worksheets.Add("Пропуск_дешифр"),
                 report.Points,
-                "Пропускная способность дешифрования, байт/с",
-                point => point.Decrypt_throughput_bytes_per_second,
+                "Пропускная способность дешифрования, КБ/с",
+                point => point.Decrypt_throughput_bytes_per_second / Bytes_per_kilobyte,
                 "0.000");
 
             if (report.Include_avalanche_sheets)

@@ -2,11 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using OfficeOpenXml;
+using OfficeOpenXml.Drawing.Chart;
 
 namespace FNS_rebuild
 {
     internal static class Analysis_comparison_excel_writer
     {
+        const double Bytes_per_kilobyte = 1024.0;
+
         internal static void Save(
             IReadOnlyList<Analysis_comparison_series> series,
             string output_xlsx_path)
@@ -24,6 +27,8 @@ namespace FNS_rebuild
 
             ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
             using ExcelPackage package = new(file);
+
+            Fill_source_size_sheet(package.Workbook.Worksheets.Add("Служебные_размеры"), series);
 
             Fill_metric_sheet(
                 package.Workbook.Worksheets.Add("Коэф_увеличения"),
@@ -52,14 +57,14 @@ namespace FNS_rebuild
             Fill_metric_sheet(
                 package.Workbook.Worksheets.Add("Пропуск_шифрование"),
                 series,
-                "Пропускная способность шифрования, байт/с",
-                point => point.Encrypt_throughput_bytes_per_second,
+                "Пропускная способность шифрования, КБ/с",
+                point => point.Encrypt_throughput_bytes_per_second / Bytes_per_kilobyte,
                 "0.000");
             Fill_metric_sheet(
                 package.Workbook.Worksheets.Add("Пропуск_дешифр"),
                 series,
-                "Пропускная способность дешифрования, байт/с",
-                point => point.Decrypt_throughput_bytes_per_second,
+                "Пропускная способность дешифрования, КБ/с",
+                point => point.Decrypt_throughput_bytes_per_second / Bytes_per_kilobyte,
                 "0.000");
             Fill_metric_sheet(
                 package.Workbook.Worksheets.Add("Лавина_сообщение"),
@@ -79,8 +84,6 @@ namespace FNS_rebuild
                 "Доля восстановленных или обнаруженных повреждений",
                 point => point.Interference_safe_outcome_ratio,
                 "0.000000");
-
-            Fill_source_size_sheet(package.Workbook.Worksheets.Add("Служебные_размеры"), series);
             package.Save();
         }
 
@@ -114,6 +117,36 @@ namespace FNS_rebuild
             if (lengths.Count > 0)
                 sheet.Cells[2, 2, lengths.Count + 1, series.Count + 1].Style.Numberformat.Format = number_format;
             sheet.Cells[sheet.Dimension.Address].AutoFitColumns();
+
+            Add_draft_line_chart(sheet, series, lengths.Count, metric_header);
+        }
+
+        static void Add_draft_line_chart(
+            ExcelWorksheet sheet,
+            IReadOnlyList<Analysis_comparison_series> series,
+            int row_count,
+            string metric_header)
+        {
+            if (row_count <= 0 || series.Count == 0)
+                return;
+
+            ExcelLineChart chart = sheet.Drawings.AddLineChart(
+                $"chart_{Guid.NewGuid():N}",
+                eLineChartType.Line);
+            chart.Title.Text = metric_header;
+            chart.SetPosition(1, 0, series.Count + 4, 0);
+            chart.SetSize(900, 420);
+            chart.XAxis.Title.Text = "Длина исходной строки, символов";
+            chart.YAxis.Title.Text = metric_header;
+            chart.Legend.Position = eLegendPosition.Bottom;
+
+            ExcelRange x_axis = sheet.Cells[2, 1, row_count + 1, 1];
+            for (int series_index = 0; series_index < series.Count; series_index++)
+            {
+                ExcelRange values = sheet.Cells[2, series_index + 2, row_count + 1, series_index + 2];
+                ExcelChartSerie chart_series = chart.Series.Add(values, x_axis);
+                chart_series.Header = series[series_index].Name;
+            }
         }
 
         static void Fill_source_size_sheet(

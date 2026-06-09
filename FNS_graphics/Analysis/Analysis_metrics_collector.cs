@@ -21,10 +21,12 @@ namespace FNS_rebuild
                 Include_interference_sheet = report_options.Include_interference_sheet
             };
 
-            int total_lengths = (report_options.Max_length - report_options.Min_length) + 1;
+            int total_lengths = ((report_options.Max_length - report_options.Min_length) / report_options.Length_step) + 1;
             int processed = 0;
 
-            for (int length = report_options.Min_length; length <= report_options.Max_length; length++)
+            for (int length = report_options.Min_length;
+                 length <= report_options.Max_length;
+                 length += report_options.Length_step)
             {
                 Performance_point point = Measure_one_length(
                     wrapper,
@@ -103,7 +105,9 @@ namespace FNS_rebuild
 
             for (int i = 0; i < tests_per_length; i++)
             {
-                string source = Analysis_random_data.Generate_random_string(length);
+                string source = Analysis_random_data.Generate_deterministic_string(
+                    length,
+                    seed: Build_source_seed(length, i));
 
                 Stopwatch encrypt_watch = Stopwatch.StartNew();
                 string ciphertext = wrapper.Encrypt(source, options);
@@ -172,6 +176,11 @@ namespace FNS_rebuild
             return new Pairwise_measurement(
                 message_avalanche_sum / tests_per_length,
                 key_sensitivity_sum / tests_per_length);
+        }
+
+        static int Build_source_seed(int length, int test_index)
+        {
+            return unchecked(length * 1000003 + test_index * 9176 + 0x5F3759DF);
         }
 
         static string Build_base_key_for_pairwise_tests(Cipher_options options, int source_length)

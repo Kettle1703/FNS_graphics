@@ -28,7 +28,6 @@ namespace FNS_graphics
             ApplyReedSolomonForJsonCheckBox.IsChecked = ui_toggle_settings.Apply_reed_solomon_for_json;
             JsonTransferDirectoryTextBox.Text = ui_toggle_settings.Json_transfer_directory_path;
             AutoSenderKeyGenerationCheckBox.IsChecked = ui_toggle_settings.Auto_sender_key_generation;
-            EnableRoundCipherCheckBox.IsChecked = ui_toggle_settings.Enable_round_cipher;
 
             Digital_signature_settings signature_settings = Digital_signature_store.Get_settings_snapshot();
             SignCiphertextCheckBox.IsChecked = signature_settings.Sign_ciphertext;
@@ -66,7 +65,6 @@ namespace FNS_graphics
                 Apply_reed_solomon_for_json = ApplyReedSolomonForJsonCheckBox.IsChecked == true,
                 Json_transfer_directory_path = JsonTransferDirectoryTextBox.Text,
                 Auto_sender_key_generation = AutoSenderKeyGenerationCheckBox.IsChecked != false,
-                Enable_round_cipher = EnableRoundCipherCheckBox.IsChecked != false,
                 Encryption_core = EncryptionCoreComboBox.SelectedIndex switch
                 {
                     1 => Encryption_core_kind.KuznyechikCtr,

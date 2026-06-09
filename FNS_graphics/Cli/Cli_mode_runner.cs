@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -130,19 +131,57 @@ namespace FNS_graphics
                 return 0;
             }
 
-            if (args.Length > 0)
+            Analysis_report_batch_options options;
+            try
             {
-                Console.WriteLine("Команда analysis-fss-reports не принимает параметры.");
+                options = Parse_analysis_options(args);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
                 Console.WriteLine();
                 Print_analysis_usage();
                 return 2;
             }
 
             Console.WriteLine("CLI: запуск построения Excel-отчётов анализа ФСС...");
-            Strategy_wrapper wrapper = Build_fns_wrapper();
-            Analysis.Run_three_analysis_reports(wrapper);
-            Console.WriteLine("CLI: построение Excel-отчётов анализа завершено.");
-            return 0;
+            Console.WriteLine($"Тип отчёта: {Format_analysis_report_kind(options.Report_kind)}");
+            Console.WriteLine($"Папка вывода: {options.Output_dir}");
+            Console.WriteLine($"Диапазон длин: {options.Min_length}..{options.Max_length}");
+            Console.WriteLine($"Шаг длины: {options.Length_step}");
+            Console.WriteLine($"Повторов Encrypt/Decrypt на длину: {options.Tests_per_length}");
+            Console.WriteLine($"Парных тестов лавины/ключа на длину: {options.Avalanche_tests_per_length}");
+            Console.WriteLine($"Тестов помехоустойчивости на длину: {options.Interference_tests_per_length}");
+            Console.WriteLine($"Повышенный приоритет процесса: {(options.Use_high_process_priority ? "да" : "нет")}");
+            Console.WriteLine();
+
+            Process current_process = Process.GetCurrentProcess();
+            ProcessPriorityClass original_priority = current_process.PriorityClass;
+
+            try
+            {
+                if (options.Use_high_process_priority)
+                    current_process.PriorityClass = ProcessPriorityClass.High;
+
+                Strategy_wrapper wrapper = Build_fns_wrapper();
+                Analysis.Run_three_analysis_reports(wrapper, options);
+                Console.WriteLine("CLI: построение Excel-отчётов анализа завершено.");
+                return 0;
+            }
+            finally
+            {
+                if (options.Use_high_process_priority)
+                {
+                    try
+                    {
+                        current_process.PriorityClass = original_priority;
+                    }
+                    catch
+                    {
+                        // Возврат приоритета best-effort: процесс уже завершает CLI-команду.
+                    }
+                }
+            }
         }
 
         static int Exit_with_optional_pause(int exit_code, bool pause_on_exit)
@@ -269,6 +308,60 @@ namespace FNS_graphics
             return false;
         }
 
+        static bool Try_read_int_option(string[] args, ref int index, string option_name, string current_arg, out int value)
+        {
+            // Пытается прочитать целочисленный параметр в формате --name value или --name=value.
+            value = 0;
+
+            string prefix = option_name + "=";
+            if (current_arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(current_arg[prefix.Length..], out value))
+                    throw new ArgumentException($"Для {option_name} указано не число: {current_arg[prefix.Length..]}");
+                return true;
+            }
+
+            if (!string.Equals(current_arg, option_name, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (index + 1 >= args.Length)
+                throw new ArgumentException($"Для {option_name} нужно указать число.");
+
+            index++;
+            if (!int.TryParse(args[index], out value))
+                throw new ArgumentException($"Для {option_name} указано не число: {args[index]}");
+
+            return true;
+        }
+
+        static bool Try_read_string_option(string[] args, ref int index, string option_name, string current_arg, out string value)
+        {
+            // Пытается прочитать строковый параметр в формате --name value или --name=value.
+            value = string.Empty;
+
+            string prefix = option_name + "=";
+            if (current_arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                value = current_arg[prefix.Length..];
+                if (string.IsNullOrWhiteSpace(value))
+                    throw new ArgumentException($"Для {option_name} нужно указать значение.");
+                return true;
+            }
+
+            if (!string.Equals(current_arg, option_name, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (index + 1 >= args.Length)
+                throw new ArgumentException($"Для {option_name} нужно указать значение.");
+
+            index++;
+            value = args[index];
+            if (string.IsNullOrWhiteSpace(value))
+                throw new ArgumentException($"Для {option_name} нужно указать значение.");
+
+            return true;
+        }
+
         static string Normalize_command(string input)
         {
             // Приводит имя команды к каноническому виду для сравнения.
@@ -329,7 +422,130 @@ namespace FNS_graphics
             Console.WriteLine("Команда: analysis-fss-reports");
             Console.WriteLine("Пример запуска:");
             Console.WriteLine("  dotnet .\\FNS_graphics\\bin\\Debug\\net8.0-windows\\FNS_graphics.dll analysis-fss-reports");
-            Console.WriteLine("Параметры не требуются.");
+            Console.WriteLine("  dotnet .\\FNS_graphics\\bin\\Debug\\net8.0-windows\\FNS_graphics.dll analysis-fss-reports --type block-length --output-dir \"C:\\data\" --max-length 1500 --tests-per-length 1");
+            Console.WriteLine();
+            Console.WriteLine("Параметры:");
+            Console.WriteLine("  --type NAME                         Тип: all, block-length, round-cipher, block-round-matrix, block-size-sweep, encryption-core.");
+            Console.WriteLine("  --output-dir PATH                   Папка для xlsx-файлов.");
+            Console.WriteLine("  --min-length N                      Минимальная длина строки (по умолчанию 1).");
+            Console.WriteLine("  --max-length N                      Максимальная длина строки (по умолчанию 5000).");
+            Console.WriteLine("  --length-step N                     Шаг перебора длин сообщений (по умолчанию 1).");
+            Console.WriteLine("  --tests-per-length N                Повторов Encrypt/Decrypt на длину (по умолчанию 3).");
+            Console.WriteLine("  --avalanche-tests-per-length N      Парных тестов лавины/ключа на длину (по умолчанию 3).");
+            Console.WriteLine("  --interference-tests-per-length N   Тестов помехоустойчивости на длину (по умолчанию 3).");
+            Console.WriteLine("  --progress-step N                   Шаг отчёта прогресса (по умолчанию 250).");
+            Console.WriteLine("  --high-priority                     Поднять приоритет процесса на время анализа.");
+            Console.WriteLine();
+            Console.WriteLine("Поддерживаются формы: --name value и --name=value.");
+        }
+
+        static Analysis_report_batch_options Parse_analysis_options(string[] args)
+        {
+            Analysis_report_batch_options options = new();
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                string arg = args[i];
+
+                if (Try_read_string_option(args, ref i, "--type", arg, out string type) ||
+                    Try_read_string_option(args, ref i, "--report", arg, out type))
+                {
+                    options.Report_kind = Parse_analysis_report_kind(type);
+                    continue;
+                }
+
+                if (Try_read_string_option(args, ref i, "--output-dir", arg, out string output_dir))
+                {
+                    options.Output_dir = output_dir;
+                    continue;
+                }
+
+                if (Try_read_int_option(args, ref i, "--min-length", arg, out int min_length))
+                {
+                    options.Min_length = min_length;
+                    continue;
+                }
+
+                if (Try_read_int_option(args, ref i, "--max-length", arg, out int max_length))
+                {
+                    options.Max_length = max_length;
+                    continue;
+                }
+
+                if (Try_read_int_option(args, ref i, "--length-step", arg, out int length_step))
+                {
+                    options.Length_step = length_step;
+                    continue;
+                }
+
+                if (Try_read_int_option(args, ref i, "--tests-per-length", arg, out int tests_per_length))
+                {
+                    options.Tests_per_length = tests_per_length;
+                    continue;
+                }
+
+                if (Try_read_int_option(args, ref i, "--avalanche-tests-per-length", arg, out int avalanche_tests_per_length))
+                {
+                    options.Avalanche_tests_per_length = avalanche_tests_per_length;
+                    continue;
+                }
+
+                if (Try_read_int_option(args, ref i, "--interference-tests-per-length", arg, out int interference_tests_per_length))
+                {
+                    options.Interference_tests_per_length = interference_tests_per_length;
+                    continue;
+                }
+
+                if (Try_read_int_option(args, ref i, "--progress-step", arg, out int progress_step))
+                {
+                    options.Progress_step = progress_step;
+                    continue;
+                }
+
+                if (string.Equals(arg, "--high-priority", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.Use_high_process_priority = true;
+                    continue;
+                }
+
+                throw new ArgumentException($"Неизвестный параметр: {arg}");
+            }
+
+            options.Validate();
+            return options;
+        }
+
+        static Analysis_report_kind Parse_analysis_report_kind(string value)
+        {
+            string normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+            return normalized switch
+            {
+                "all" or "все" => Analysis_report_kind.All,
+                "1" or "block" or "blocks" or "block-length" or "fss-block-length" =>
+                    Analysis_report_kind.Fss_block_length,
+                "2" or "round" or "round-cipher" or "fss-round-cipher" =>
+                    Analysis_report_kind.Fss_round_cipher,
+                "matrix" or "block-round" or "block-round-matrix" or "2x2" =>
+                    Analysis_report_kind.Fss_block_round_matrix,
+                "sweep" or "block-sweep" or "block-size-sweep" or "block-size" =>
+                    Analysis_report_kind.Fss_block_size_sweep,
+                "3" or "core" or "cores" or "encryption-core" or "core-comparison" =>
+                    Analysis_report_kind.Encryption_core,
+                _ => throw new ArgumentException($"Неизвестный тип отчёта анализа: {value}")
+            };
+        }
+
+        static string Format_analysis_report_kind(Analysis_report_kind kind)
+        {
+            return kind switch
+            {
+                Analysis_report_kind.Fss_block_length => "сравнение ФСС по длине блока 512/1096",
+                Analysis_report_kind.Fss_round_cipher => "сравнение ФСС с раундовым шифрованием и без",
+                Analysis_report_kind.Fss_block_round_matrix => "матрица ФСС 512/1096 с раундовым шифрованием и без",
+                Analysis_report_kind.Fss_block_size_sweep => "подбор длины блока ФСС при включённом раундовом шифровании",
+                Analysis_report_kind.Encryption_core => "сравнение ядер шифрования",
+                _ => "все отчёты"
+            };
         }
 
         sealed class Stochastic_cli_options

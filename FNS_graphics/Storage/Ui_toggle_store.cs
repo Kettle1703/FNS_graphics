@@ -10,7 +10,6 @@ namespace FNS_graphics
         public bool Apply_reed_solomon_for_json { get; set; } = true;
         public string Json_transfer_directory_path { get; set; } = Build_default_json_directory_path();
         public bool Auto_sender_key_generation { get; set; } = true;
-        public bool Enable_round_cipher { get; set; } = true;
         public Encryption_core_kind Encryption_core { get; set; } = Encryption_core_kind.Factorial;
 
         internal static string Build_default_json_directory_path()
@@ -34,7 +33,6 @@ namespace FNS_graphics
                     Apply_reed_solomon_for_json = settings.Apply_reed_solomon_for_json,
                     Json_transfer_directory_path = Normalize_json_transfer_directory_path(settings.Json_transfer_directory_path),
                     Auto_sender_key_generation = settings.Auto_sender_key_generation,
-                    Enable_round_cipher = settings.Enable_round_cipher,
                     Encryption_core = settings.Encryption_core
                 };
             }
@@ -50,7 +48,6 @@ namespace FNS_graphics
                 settings.Apply_reed_solomon_for_json = input.Apply_reed_solomon_for_json;
                 settings.Json_transfer_directory_path = Normalize_json_transfer_directory_path(input.Json_transfer_directory_path);
                 settings.Auto_sender_key_generation = input.Auto_sender_key_generation;
-                settings.Enable_round_cipher = input.Enable_round_cipher;
                 settings.Encryption_core = input.Encryption_core;
             }
         }

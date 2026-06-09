@@ -6,7 +6,7 @@ namespace FNS_rebuild
 
         internal int Block_plain_text_length = 0;  // Максимальная длина открытого блока; 0 означает шифрование без подблоков.
         internal string Key = "";  // Текстовый ключ; будет преобразован в коэффициенты ФСС и применён к коэффициентам сообщения.
-        internal bool Enable_round_cipher = true;  // Управляет включением раундового слоя поверх ФСС-коэффициентов.
+        internal bool Enable_round_cipher = true;  // Устаревшее поле: раундовый слой ФСС включается всегда, когда задан ключ.
         internal Encryption_core_kind Encryption_core = Encryption_core_kind.Factorial;
         internal byte[]? Fixed_message_nonce = null;  // Служебно для анализа: фиксирует nonce/IV при парном сравнении шифротекстов.
 
@@ -23,7 +23,7 @@ namespace FNS_rebuild
         {
             // Показывает, нужно ли применять ключ к коэффициентам ФСС.
 
-            return Enable_round_cipher && !string.IsNullOrEmpty(Key);
+            return !string.IsNullOrEmpty(Key);
         }
     }
 }

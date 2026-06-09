@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using static System.Console;
@@ -12,19 +13,41 @@ namespace FNS_rebuild
         const int Default_comparison_block_length = 1096;
         const string Fss_analysis_key = "ANALYSIS_FSS_ROUND_KEY_256";
         const string Standard_core_analysis_key = "ANALYSIS_CORE_COMPARISON_KEY_256";
+        static readonly int[] Block_size_sweep_lengths = [16, 32, 64, 128, 256, 512, 1024, 1096];
 
-        public static void Run_three_analysis_reports(Strategy_wrapper wrapper)
+        public static void Run_three_analysis_reports(
+            Strategy_wrapper wrapper,
+            Analysis_report_batch_options? batch_options = null)
         {
             // Пакетный режим анализа для последующей сборки графиков в Python:
             // 1) сравнение ФСС по длине открытого блока 512/1096;
             // 2) сравнение ФСС с раундовым шифрованием и без него;
             // 3) сравнение ядер шифрования между собой.
-            string output_dir = Path.Combine(AppContext.BaseDirectory, "analysis_reports");
+            batch_options ??= new Analysis_report_batch_options();
+            batch_options.Validate();
+
+            string output_dir = batch_options.Output_dir;
             Directory.CreateDirectory(output_dir);
 
-            Build_fss_block_length_comparison(output_dir);
-            Build_fss_round_cipher_comparison(output_dir);
-            Build_encryption_core_comparison(output_dir);
+            if (batch_options.Report_kind == Analysis_report_kind.All ||
+                batch_options.Report_kind == Analysis_report_kind.Fss_block_length)
+                Build_fss_block_length_comparison(output_dir, batch_options);
+
+            if (batch_options.Report_kind == Analysis_report_kind.All ||
+                batch_options.Report_kind == Analysis_report_kind.Fss_round_cipher)
+                Build_fss_round_cipher_comparison(output_dir, batch_options);
+
+            if (batch_options.Report_kind == Analysis_report_kind.All ||
+                batch_options.Report_kind == Analysis_report_kind.Fss_block_round_matrix)
+                Build_fss_block_round_matrix_comparison(output_dir, batch_options);
+
+            if (batch_options.Report_kind == Analysis_report_kind.All ||
+                batch_options.Report_kind == Analysis_report_kind.Fss_block_size_sweep)
+                Build_fss_block_size_sweep(output_dir, batch_options);
+
+            if (batch_options.Report_kind == Analysis_report_kind.All ||
+                batch_options.Report_kind == Analysis_report_kind.Encryption_core)
+                Build_encryption_core_comparison(output_dir, batch_options);
         }
 
         public static void Print(Digit[] input, int width = 5, int per_line = 10)
@@ -139,9 +162,11 @@ namespace FNS_rebuild
             WriteLine($"Анализ завершён. Файл создан: {report_options.Output_xlsx_path}");
         }
 
-        static void Build_fss_block_length_comparison(string output_dir)
+        static void Build_fss_block_length_comparison(
+            string output_dir,
+            Analysis_report_batch_options batch_options)
         {
-            Performance_report_options options = Build_default_comparison_options(
+            Performance_report_options options = batch_options.Build_performance_options(
                 Path.Combine(output_dir, "01_fss_block_length_comparison.xlsx"));
 
             Analysis_comparison_series[] series =
@@ -174,9 +199,11 @@ namespace FNS_rebuild
             WriteLine($"Сравнение длин блоков ФСС создано: {options.Output_xlsx_path}");
         }
 
-        static void Build_fss_round_cipher_comparison(string output_dir)
+        static void Build_fss_round_cipher_comparison(
+            string output_dir,
+            Analysis_report_batch_options batch_options)
         {
-            Performance_report_options options = Build_default_comparison_options(
+            Performance_report_options options = batch_options.Build_performance_options(
                 Path.Combine(output_dir, "02_fss_round_cipher_comparison.xlsx"));
 
             Analysis_comparison_series[] series =
@@ -209,9 +236,100 @@ namespace FNS_rebuild
             WriteLine($"Сравнение раундового слоя ФСС создано: {options.Output_xlsx_path}");
         }
 
-        static void Build_encryption_core_comparison(string output_dir)
+        static void Build_fss_block_round_matrix_comparison(
+            string output_dir,
+            Analysis_report_batch_options batch_options)
         {
-            Performance_report_options options = Build_default_comparison_options(
+            Performance_report_options options = batch_options.Build_performance_options(
+                Path.Combine(output_dir, "04_fss_block_round_matrix.xlsx"));
+
+            Analysis_comparison_series[] series =
+            [
+                Collect_series(
+                    "ФСС, блок 512, раундовое шифрование отключено",
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = 512,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = false,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options),
+                Collect_series(
+                    "ФСС, блок 512, раундовое шифрование включено",
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = 512,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = true,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options),
+                Collect_series(
+                    "ФСС, блок 1096, раундовое шифрование отключено",
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = 1096,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = false,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options),
+                Collect_series(
+                    "ФСС, блок 1096, раундовое шифрование включено",
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = 1096,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = true,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options)
+            ];
+
+            Analysis_comparison_excel_writer.Save(series, options.Output_xlsx_path);
+            WriteLine($"Матрица длины блока и раундового слоя ФСС создана: {options.Output_xlsx_path}");
+        }
+
+        static void Build_fss_block_size_sweep(
+            string output_dir,
+            Analysis_report_batch_options batch_options)
+        {
+            Performance_report_options options = batch_options.Build_performance_options(
+                Path.Combine(output_dir, "05_fss_block_size_sweep.xlsx"));
+
+            List<Analysis_block_size_sweep_item> items = [];
+            foreach (int block_length in Block_size_sweep_lengths)
+            {
+                string name = $"ФСС, блок {block_length}, раундовое шифрование включено";
+                Analysis_report report = Analysis_metrics_collector.Collect(
+                    new Strategy_wrapper(new Factorial_strategy()),
+                    new Cipher_options
+                    {
+                        Block_plain_text_length = block_length,
+                        Key = Fss_analysis_key,
+                        Enable_round_cipher = true,
+                        Encryption_core = Encryption_core_kind.Factorial
+                    },
+                    options,
+                    write_progress: message => WriteLine($"{name}: {message}"));
+
+                items.Add(new Analysis_block_size_sweep_item(block_length, report));
+            }
+
+            Analysis_block_size_sweep_excel_writer.Save(items, options, options.Output_xlsx_path);
+            WriteLine($"Подбор длины блока ФСС создан: {options.Output_xlsx_path}");
+        }
+
+        static void Build_encryption_core_comparison(
+            string output_dir,
+            Analysis_report_batch_options batch_options)
+        {
+            Performance_report_options options = batch_options.Build_performance_options(
                 Path.Combine(output_dir, "03_encryption_core_comparison.xlsx"));
 
             Analysis_comparison_series[] series =
@@ -253,22 +371,6 @@ namespace FNS_rebuild
 
             Analysis_comparison_excel_writer.Save(series, options.Output_xlsx_path);
             WriteLine($"Сравнение ядер шифрования создано: {options.Output_xlsx_path}");
-        }
-
-        static Performance_report_options Build_default_comparison_options(string output_path)
-        {
-            return new Performance_report_options
-            {
-                Min_length = 1,
-                Max_length = 5000,
-                Tests_per_length = 3,
-                Avalanche_tests_per_length = 3,
-                Interference_tests_per_length = 3,
-                Progress_step = 250,
-                Output_xlsx_path = output_path,
-                Include_avalanche_sheet = true,
-                Include_interference_sheet = true
-            };
         }
 
         static Analysis_comparison_series Collect_series(

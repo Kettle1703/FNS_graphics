@@ -24,7 +24,6 @@ namespace FNS_graphics
             string? receiver_public_base64,
             byte[] default_receiver_public_spki,
             int block_plain_text_length,
-            bool enable_round_cipher,
             Encryption_core_kind encryption_core,
             string auto_placeholder,
             out Encrypt_request request,
@@ -56,7 +55,7 @@ namespace FNS_graphics
             {
                 Block_plain_text_length = block_plain_text_length,
                 Key = string.Empty,
-                Enable_round_cipher = enable_round_cipher,
+                Enable_round_cipher = true,
                 Encryption_core = encryption_core
             };
 
@@ -71,7 +70,6 @@ namespace FNS_graphics
             string? key_derivation_salt_text,
             string? sender_public_key_signature_text,
             int block_plain_text_length,
-            bool enable_round_cipher,
             Encryption_core_kind encryption_core,
             string auto_placeholder,
             out Hybrid_cipher_package packet,
@@ -128,7 +126,7 @@ namespace FNS_graphics
                     ? string.Empty
                     : sender_public_key_signature,
                 Block_plain_text_length = block_plain_text_length,
-                Round_cipher_enabled = enable_round_cipher,
+                Round_cipher_enabled = encryption_core == Encryption_core_kind.Factorial,
                 Encryption_core = encryption_core,
                 Curve_id = Hybrid_fns_cryptosystem.Curve_id_nist_p256
             };

@@ -157,19 +157,6 @@
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource SectionTitleStyle}">
-                            Повысить безопасность раундовым шифрованием
-                        </TextBlock>
-                        <Border Style="{StaticResource SoftToggleContainerStyle}" Margin="0,0,0,8">
-                            <CheckBox x:Name="EnableRoundCipherCheckBox"
-                                      Content="Включить раундовое шифрование"
-                                      Style="{StaticResource SoftToggleCheckBoxStyle}" />
-                        </Border>
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource CardStyle}">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitleStyle}">
                             Наложение цифровой подписи на весь пакет шифротекста.
                         </TextBlock>
                         <Border Style="{StaticResource SoftToggleContainerStyle}" Margin="0,0,0,8">
