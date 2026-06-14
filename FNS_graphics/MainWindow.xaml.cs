@@ -55,6 +55,8 @@ namespace FNS_graphics
         private bool _lastPacketRecoveredFromReedSolomon;
         private bool _warmUpCompleted;
         private bool _warmUpInProgress;
+        private string _startupWarningMessage = string.Empty;
+        private DigitalSignatureSettingsWindow? _digitalSignatureSettingsWindow;
         private const string AutoPlaceholder = "<заполняется автоматически>";
         private const string LinksRequiredStatusMessage = "Для шифрования или дешифрования необходимо настроить связи ключей.";
 
@@ -64,8 +66,7 @@ namespace FNS_graphics
             InitializeComponent();
             Load_ui_toggle_snapshot_into_controls();
 
-            _receiverPrivateKey = Receiver_key_store.LoadOrCreateDefault();
-            _receiverPublicKeySpki = _receiverPrivateKey.ExportSubjectPublicKeyInfo();
+            (_receiverPrivateKey, _receiverPublicKeySpki, _startupWarningMessage) = Load_receiver_key_or_regenerate();
 
             SharedSenderPublicKeyTextBox.Text = AutoPlaceholder;
             SharedSenderPublicKeySignatureTextBox.Text = string.Empty;
@@ -76,7 +77,7 @@ namespace FNS_graphics
 
             EncryptMetricsTextBlock.Text = "Ядро: - | Обёртка: - | Длина: -";
             DecryptMetricsTextBlock.Text = "Ядро: - | Обёртка: - | Длина: -";
-            StatusTextBlock.Text = "Подготовка словарей шифрования...";
+            StatusTextBlock.Text = Build_startup_status_text("Подготовка словарей шифрования...");
             SetCryptographyActionsEnabled(false);
             Digital_signature_settings initial_signature_settings = Digital_signature_store.Get_settings_snapshot();
             ApplySignatureControlsState(initial_signature_settings.Sign_ciphertext);
@@ -108,8 +109,16 @@ namespace FNS_graphics
                 return;
             }
 
-            Clipboard.SetText(text);
-            StatusTextBlock.Text = "Содержимое поля скопировано в буфер обмена.";
+            try
+            {
+                Clipboard.SetText(text);
+                StatusTextBlock.Text = "Содержимое поля скопировано в буфер обмена.";
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = $"Не удалось записать в буфер обмена: {ex.Message}";
+                MarkErrorHighlights(source);
+            }
         }
 
         private void EncryptCommand_Executed(object sender, ExecutedRoutedEventArgs e)
@@ -139,12 +148,12 @@ namespace FNS_graphics
 
                 _warmUpCompleted = true;
                 SetCryptographyActionsEnabled(true);
-                StatusTextBlock.Text = $"Словари шифрования загружены ({watch.Elapsed.TotalMilliseconds:F0} мс).";
+                StatusTextBlock.Text = Build_startup_status_text($"Словари шифрования загружены ({watch.Elapsed.TotalMilliseconds:F0} мс).");
                 _ = Try_apply_active_recipient_link_to_main_form(report_validation_error: false);
             }
             catch (Exception ex)
             {
-                StatusTextBlock.Text = $"Ошибка загрузки словарей: {ex.Message}";
+                StatusTextBlock.Text = Build_startup_status_text($"Ошибка загрузки словарей: {ex.Message}");
             }
             finally
             {
@@ -180,15 +189,31 @@ namespace FNS_graphics
 
         private void ReloadReceiverKey()
         {
-            ECDiffieHellman previous_key = _receiverPrivateKey;
-            _receiverPrivateKey = Receiver_key_store.LoadOrCreateDefault();
-            _receiverPublicKeySpki = _receiverPrivateKey.ExportSubjectPublicKeyInfo();
-            previous_key.Dispose();
+            try
+            {
+                ECDiffieHellman previous_key = _receiverPrivateKey;
+                (_receiverPrivateKey, _receiverPublicKeySpki, string warning_message) = Load_receiver_key_or_regenerate();
+                previous_key.Dispose();
+
+                if (warning_message.Length > 0)
+                    StatusTextBlock.Text = warning_message;
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = $"Ошибка загрузки ECDH-ключа получателя: {ex.Message}";
+                SetCryptographyActionsEnabled(false);
+            }
         }
 
         private void DigitalSignatureSettingsButton_Click(object sender, RoutedEventArgs e)
         {
             // Открывает окно настроек цифровой подписи.
+            if (_digitalSignatureSettingsWindow is { IsVisible: true })
+            {
+                _digitalSignatureSettingsWindow.Activate();
+                return;
+            }
+
             DigitalSignatureSettingsWindow settingsWindow = new()
             {
                 Owner = this,
@@ -196,12 +221,16 @@ namespace FNS_graphics
             };
 
             settingsWindow.Closed += DigitalSignatureSettingsWindow_Closed;
+            _digitalSignatureSettingsWindow = settingsWindow;
             settingsWindow.Show();
         }
 
         private void DigitalSignatureSettingsWindow_Closed(object? sender, EventArgs e)
         {
             // После закрытия окна настроек подтягивает ключи активной связи в основную форму.
+            if (ReferenceEquals(sender, _digitalSignatureSettingsWindow))
+                _digitalSignatureSettingsWindow = null;
+
             bool previous_auto_sender_mode = IsAutoSenderKeyGenerationEnabled();
             Load_ui_toggle_snapshot_into_controls();
             bool auto_sender_mode_changed = IsAutoSenderKeyGenerationEnabled() != previous_auto_sender_mode;
@@ -724,6 +753,39 @@ namespace FNS_graphics
             StringBuilder status = new();
             compose_status(status);
             return status.ToString().TrimEnd('\r', '\n');
+        }
+
+        private string Build_startup_status_text(string status)
+        {
+            if (string.IsNullOrWhiteSpace(_startupWarningMessage))
+                return status;
+
+            return $"{_startupWarningMessage}{Environment.NewLine}{status}";
+        }
+
+        private static (ECDiffieHellman Private_key, byte[] Public_key_spki, string Warning_message) Load_receiver_key_or_regenerate()
+        {
+            try
+            {
+                ECDiffieHellman private_key = Receiver_key_store.LoadOrCreateDefault();
+                return (private_key, private_key.ExportSubjectPublicKeyInfo(), string.Empty);
+            }
+            catch (Exception load_exception)
+            {
+                try
+                {
+                    Receiver_key_store.RegenerateDefault();
+                    ECDiffieHellman private_key = Receiver_key_store.LoadOrCreateDefault();
+                    string warning = $"Локальный ECDH-ключ получателя был пересоздан после ошибки загрузки: {load_exception.Message}";
+                    return (private_key, private_key.ExportSubjectPublicKeyInfo(), warning);
+                }
+                catch (Exception regenerate_exception)
+                {
+                    throw new InvalidOperationException(
+                        $"Не удалось загрузить или пересоздать локальный ECDH-ключ получателя: {regenerate_exception.Message}",
+                        regenerate_exception);
+                }
+            }
         }
 
         private void ApplySignatureControlsState(bool isSignatureEnabled)

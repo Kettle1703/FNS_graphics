@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using OfficeOpenXml;
 using OfficeOpenXml.Drawing.Chart;
 
@@ -18,16 +17,7 @@ namespace FNS_rebuild
             if (items.Count == 0)
                 throw new ArgumentException("Нужно передать хотя бы один размер блока.", nameof(items));
 
-            string? directory = Path.GetDirectoryName(output_xlsx_path);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            FileInfo file = new(output_xlsx_path);
-            if (file.Exists)
-                file.Delete();
-
-            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-            using ExcelPackage package = new(file);
+            using ExcelPackage package = Analysis_excel_package.Create_new(output_xlsx_path);
 
             Fill_parameters_sheet(package.Workbook.Worksheets.Add("Параметры"), items, options);
             Fill_summary_sheet(package.Workbook.Worksheets.Add("Сводка"), items);

@@ -15,25 +15,38 @@ namespace FNS_graphics
 
         void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            Apply_screen_height();
-
-            Ui_toggle_settings ui_toggle_settings = Ui_toggle_store.Get_snapshot();
-            EncryptionCoreComboBox.SelectedIndex = ui_toggle_settings.Encryption_core switch
+            try
             {
-                Encryption_core_kind.KuznyechikCtr => 1,
-                Encryption_core_kind.AesGcm => 2,
-                _ => 0
-            };
-            BuildJsonFileCheckBox.IsChecked = ui_toggle_settings.Build_json_file;
-            ApplyReedSolomonForJsonCheckBox.IsChecked = ui_toggle_settings.Apply_reed_solomon_for_json;
-            JsonTransferDirectoryTextBox.Text = ui_toggle_settings.Json_transfer_directory_path;
-            AutoSenderKeyGenerationCheckBox.IsChecked = ui_toggle_settings.Auto_sender_key_generation;
+                Apply_screen_height();
 
-            Digital_signature_settings signature_settings = Digital_signature_store.Get_settings_snapshot();
-            SignCiphertextCheckBox.IsChecked = signature_settings.Sign_ciphertext;
+                Ui_toggle_settings ui_toggle_settings = Ui_toggle_store.Get_snapshot();
+                EncryptionCoreComboBox.SelectedIndex = ui_toggle_settings.Encryption_core switch
+                {
+                    Encryption_core_kind.KuznyechikCtr => 1,
+                    Encryption_core_kind.AesGcm => 2,
+                    _ => 0
+                };
+                BuildJsonFileCheckBox.IsChecked = ui_toggle_settings.Build_json_file;
+                ApplyReedSolomonForJsonCheckBox.IsChecked = ui_toggle_settings.Apply_reed_solomon_for_json;
+                JsonTransferDirectoryTextBox.Text = ui_toggle_settings.Json_transfer_directory_path;
+                AutoSenderKeyGenerationCheckBox.IsChecked = ui_toggle_settings.Auto_sender_key_generation;
 
-            Apply_json_file_dependent_controls_state();
-            loaded = true;
+                Digital_signature_settings signature_settings = Digital_signature_store.Get_settings_snapshot();
+                SignCiphertextCheckBox.IsChecked = signature_settings.Sign_ciphertext;
+
+                Apply_json_file_dependent_controls_state();
+                loaded = true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    $"Не удалось загрузить переключатели режима: {ex.Message}",
+                    "Ошибка загрузки настроек",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                Close();
+            }
         }
 
         void Apply_screen_height()
@@ -59,23 +72,35 @@ namespace FNS_graphics
             if (!loaded)
                 return;
 
-            Ui_toggle_store.Save(new Ui_toggle_settings
+            try
             {
-                Build_json_file = BuildJsonFileCheckBox.IsChecked == true,
-                Apply_reed_solomon_for_json = ApplyReedSolomonForJsonCheckBox.IsChecked == true,
-                Json_transfer_directory_path = JsonTransferDirectoryTextBox.Text,
-                Auto_sender_key_generation = AutoSenderKeyGenerationCheckBox.IsChecked != false,
-                Encryption_core = EncryptionCoreComboBox.SelectedIndex switch
+                Ui_toggle_store.Save(new Ui_toggle_settings
                 {
-                    1 => Encryption_core_kind.KuznyechikCtr,
-                    2 => Encryption_core_kind.AesGcm,
-                    _ => Encryption_core_kind.Factorial
-                }
-            });
+                    Build_json_file = BuildJsonFileCheckBox.IsChecked == true,
+                    Apply_reed_solomon_for_json = ApplyReedSolomonForJsonCheckBox.IsChecked == true,
+                    Json_transfer_directory_path = JsonTransferDirectoryTextBox.Text,
+                    Auto_sender_key_generation = AutoSenderKeyGenerationCheckBox.IsChecked != false,
+                    Encryption_core = EncryptionCoreComboBox.SelectedIndex switch
+                    {
+                        1 => Encryption_core_kind.KuznyechikCtr,
+                        2 => Encryption_core_kind.AesGcm,
+                        _ => Encryption_core_kind.Factorial
+                    }
+                });
 
-            Digital_signature_settings signature_settings = Digital_signature_store.Get_settings_snapshot();
-            signature_settings.Sign_ciphertext = SignCiphertextCheckBox.IsChecked != false;
-            Digital_signature_store.Save_settings(signature_settings);
+                Digital_signature_settings signature_settings = Digital_signature_store.Get_settings_snapshot();
+                signature_settings.Sign_ciphertext = SignCiphertextCheckBox.IsChecked != false;
+                Digital_signature_store.Save_settings(signature_settings);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    $"Переключатели режима не сохранены: {ex.Message}",
+                    "Ошибка сохранения настроек",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
         }
 
         void CloseButton_Click(object sender, RoutedEventArgs e)

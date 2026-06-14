@@ -1,5 +1,5 @@
 using System;
-using System.IO;
+using FNS_graphics;
 
 namespace FNS_rebuild
 {
@@ -23,7 +23,7 @@ namespace FNS_rebuild
         public int Progress_step = 250;
 
         // Путь до одного итогового xlsx-файла.
-        public string Output_xlsx_path = Path.Combine(AppContext.BaseDirectory, "FNS_analysis.xlsx");
+        public string Output_xlsx_path = App_storage_paths.Analysis_report_file_path;
 
         // Включать ли листы лавинного теста и чувствительности к ключу.
         public bool Include_avalanche_sheet = true;

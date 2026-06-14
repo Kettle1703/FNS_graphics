@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using OfficeOpenXml;
 
 namespace FNS_rebuild
@@ -11,17 +10,7 @@ namespace FNS_rebuild
 
         internal static void Save(Analysis_report report, string output_xlsx_path)
         {
-            string? directory = Path.GetDirectoryName(output_xlsx_path);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            FileInfo file = new(output_xlsx_path);
-            if (file.Exists)
-                file.Delete();
-
-            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-
-            using ExcelPackage package = new(file);
+            using ExcelPackage package = Analysis_excel_package.Create_new(output_xlsx_path);
 
             Fill_expansion_sheet(package.Workbook.Worksheets.Add("Коэф_увеличения"), report.Points);
             Fill_absolute_growth_sheet(package.Workbook.Worksheets.Add("Абс_прирост"), report.Points);

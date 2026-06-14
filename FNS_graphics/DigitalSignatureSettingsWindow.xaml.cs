@@ -20,21 +20,34 @@ namespace FNS_graphics
 
         void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            Load_own_receiver_public_key();
+            try
+            {
+                Load_own_receiver_public_key();
 
-            Digital_signature_settings settings = Digital_signature_store.Get_settings_snapshot();
-            SignCiphertextCheckBox.IsChecked = settings.Sign_ciphertext;
+                Digital_signature_settings settings = Digital_signature_store.Get_settings_snapshot();
+                SignCiphertextCheckBox.IsChecked = settings.Sign_ciphertext;
 
-            recipient_links.Clear();
-            foreach (Recipient_key_link_entry source in settings.Recipient_links)
-                recipient_links.Add(Build_view_item_from_link(source));
+                recipient_links.Clear();
+                foreach (Recipient_key_link_entry source in settings.Recipient_links)
+                    recipient_links.Add(Build_view_item_from_link(source));
 
-            active_recipient_runtime_key = Find_runtime_key_by_link_id(settings.Active_recipient_link_id);
-            if (active_recipient_runtime_key.Length == 0 && recipient_links.Count > 0)
-                active_recipient_runtime_key = recipient_links[0].Runtime_key;
+                active_recipient_runtime_key = Find_runtime_key_by_link_id(settings.Active_recipient_link_id);
+                if (active_recipient_runtime_key.Length == 0 && recipient_links.Count > 0)
+                    active_recipient_runtime_key = recipient_links[0].Runtime_key;
 
-            Refresh_recipient_links_list();
-            settings_loaded_from_store = true;
+                Refresh_recipient_links_list();
+                settings_loaded_from_store = true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    $"Не удалось загрузить настройки цифровой подписи: {ex.Message}",
+                    "Ошибка настроек цифровой подписи",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                Close();
+            }
         }
 
         void Window_Closed(object? sender, EventArgs e)
@@ -42,36 +55,48 @@ namespace FNS_graphics
             if (!settings_loaded_from_store)
                 return;
 
-            Save_own_receiver_public_key_if_possible();
-
-            List<Recipient_key_link_entry> links_to_save = [];
-            foreach (Recipient_link_view_item view in recipient_links)
+            try
             {
-                string link_id = Normalize_identifier(view.Link_id);
-                if (link_id.Length == 0)
-                    link_id = Guid.NewGuid().ToString("N");
+                Save_own_receiver_public_key_if_possible();
 
-                links_to_save.Add(new Recipient_key_link_entry
+                List<Recipient_key_link_entry> links_to_save = [];
+                foreach (Recipient_link_view_item view in recipient_links)
                 {
-                    Link_id = link_id,
-                    Recipient_name = Normalize_identifier(view.Recipient_name),
-                    Sender_signing_private_key_pkcs8 = Normalize_base64_text(view.Sender_signing_private_key_pkcs8),
-                    Sender_signing_public_key_spki = Normalize_base64_text(view.Sender_signing_public_key_spki),
-                    Trusted_sender_signing_public_key = Normalize_base64_text(view.Trusted_sender_signing_public_key),
-                    Receiver_hybrid_public_key = Normalize_base64_text(view.Receiver_hybrid_public_key)
+                    string link_id = Normalize_identifier(view.Link_id);
+                    if (link_id.Length == 0)
+                        link_id = Guid.NewGuid().ToString("N");
+
+                    links_to_save.Add(new Recipient_key_link_entry
+                    {
+                        Link_id = link_id,
+                        Recipient_name = Normalize_identifier(view.Recipient_name),
+                        Sender_signing_private_key_pkcs8 = Normalize_base64_text(view.Sender_signing_private_key_pkcs8),
+                        Sender_signing_public_key_spki = Normalize_base64_text(view.Sender_signing_public_key_spki),
+                        Trusted_sender_signing_public_key = Normalize_base64_text(view.Trusted_sender_signing_public_key),
+                        Receiver_hybrid_public_key = Normalize_base64_text(view.Receiver_hybrid_public_key)
+                    });
+                }
+
+                string active_link_id_to_save = Find_link_id_by_runtime_key(active_recipient_runtime_key);
+                if (active_link_id_to_save.Length == 0 && links_to_save.Count > 0)
+                    active_link_id_to_save = links_to_save[0].Link_id;
+
+                Digital_signature_store.Save_settings(new Digital_signature_settings
+                {
+                    Sign_ciphertext = SignCiphertextCheckBox.IsChecked != false,
+                    Recipient_links = links_to_save,
+                    Active_recipient_link_id = active_link_id_to_save
                 });
             }
-
-            string active_link_id_to_save = Find_link_id_by_runtime_key(active_recipient_runtime_key);
-            if (active_link_id_to_save.Length == 0 && links_to_save.Count > 0)
-                active_link_id_to_save = links_to_save[0].Link_id;
-
-            Digital_signature_store.Save_settings(new Digital_signature_settings
+            catch (Exception ex)
             {
-                Sign_ciphertext = SignCiphertextCheckBox.IsChecked != false,
-                Recipient_links = links_to_save,
-                Active_recipient_link_id = active_link_id_to_save
-            });
+                MessageBox.Show(
+                    this,
+                    $"Настройки цифровой подписи не сохранены: {ex.Message}",
+                    "Ошибка сохранения настроек",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
         }
 
         void CreateRecipientLinkButton_Click(object sender, RoutedEventArgs e)
@@ -142,7 +167,19 @@ namespace FNS_graphics
             if (result != MessageBoxResult.Yes)
                 return;
 
-            OwnReceiverPublicKeyTextBox.Text = Receiver_key_store.RegenerateDefault();
+            try
+            {
+                OwnReceiverPublicKeyTextBox.Text = Receiver_key_store.RegenerateDefault();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    $"Не удалось создать новый ECDH-ключ получателя: {ex.Message}",
+                    "Ошибка создания ключа ECDH",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
         }
 
         void Refresh_recipient_links_list()

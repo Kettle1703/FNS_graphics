@@ -57,7 +57,7 @@ namespace FNS_graphics
             if (string.IsNullOrWhiteSpace(value))
                 return Ui_toggle_settings.Build_default_json_directory_path();
 
-            return Environment.ExpandEnvironmentVariables(value.Trim());
+            return App_storage_paths.Resolve_from_executable_directory(value);
         }
     }
 }

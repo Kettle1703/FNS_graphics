@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using FNS_graphics;
 
 namespace FNS_rebuild
 {
@@ -16,7 +17,7 @@ namespace FNS_rebuild
     internal sealed class Analysis_report_batch_options
     {
         internal Analysis_report_kind Report_kind = Analysis_report_kind.All;
-        internal string Output_dir = Path.Combine(AppContext.BaseDirectory, "analysis_reports");
+        internal string Output_dir = App_storage_paths.Analysis_reports_directory_path;
         internal int Min_length = 1;
         internal int Max_length = 5000;
         internal int Length_step = 1;
